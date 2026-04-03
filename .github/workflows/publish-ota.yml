@@ -108,7 +108,7 @@ jobs:
         id: rename_apk
         run: |
           RELEASE_DATE=$(TZ=Asia/Kolkata date +"%d %b %Y")
-          APK_ASSET_NAME="Navigator App (${RELEASE_DATE}).apk"
+          APK_ASSET_NAME="Survey App (${RELEASE_DATE}).apk"
           mv "android/app/build/outputs/apk/release/app-release.apk" "android/app/build/outputs/apk/release/${APK_ASSET_NAME}"
           echo "apk_asset_name=${APK_ASSET_NAME}" >> "$GITHUB_OUTPUT"
 

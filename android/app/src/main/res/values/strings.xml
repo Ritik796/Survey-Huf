@@ -1,4 +1,5 @@
 <resources>
-    <string name="app_name">Survey_Huf</string>
+    <string name="app_name">Survey App</string>
     <string name="google_maps_api_key">AIzaSyCRq4Btoz3fa9TDW9UUVpM6lhqDePs7JzM</string>
 </resources>
+
