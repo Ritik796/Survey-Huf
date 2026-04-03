@@ -9,6 +9,7 @@ export const getLoggedInSurveyor = async (navigate, userId, showAlert, setLoadin
 
   if (resp.status === 'success' && resp.data) {
     const data = resp.data;
+    console.log('data',data)
     const resolvedName = data?.name ?? data?.Name ?? data?.surveyorName ?? '';
 
     await saveUserDetails({

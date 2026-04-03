@@ -11,6 +11,7 @@ const CONFIG = {
     error: { bg: '#fff1f0', icon: 'error', border: colors.error },
     info: { bg: '#eff6ff', icon: 'info', border: '#3b82f6' },
 };
+// jo text samjena wale hein unhein hindi mein likho baki english mein hi rakho button header
 // ─── Provider ────────────────────────────────────────────────────────────────
 export const AlertProvider = ({ children }) => {
     const [alert, setAlert] = useState({ visible: false, type: 'success', message: '' });

@@ -50,6 +50,7 @@ export const DEVTEST_CITY = {
 // __DEV__ = false → release/production → uses Hisar
 const ACTIVE_CONFIG = __DEV__ ? DEVTEST_CONFIG : HISAR_CONFIG;
 export const CITY   = __DEV__ ? DEVTEST_CITY   : HISAR_CITY;
+export const FIREBASE_CONFIG = ACTIVE_CONFIG;
 
 // ─── Initialize Firebase ──────────────────────────────────────────────────────
 let _db = null;

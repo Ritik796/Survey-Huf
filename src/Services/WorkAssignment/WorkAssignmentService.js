@@ -4,6 +4,8 @@ import { getData, updateData } from '../../Firebase/dbServices';
 // Reads SurveyorsCuurentAssignment/{userId} — same path as web app
 export const checkWorkAssignment = async (userId) => {
   try {
+    console.log(`SurveyorsCuurentAssignment/${userId}`
+)
     const assignment = await getData(`SurveyorsCuurentAssignment/${userId}`);
     if (!assignment) {
       return { status: 'error', message: 'No work assigned yet. Contact your supervisor.' };

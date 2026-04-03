@@ -5,6 +5,7 @@ import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 
 import { AlertProvider } from './src/Components/AlertToast/AlertToast';
+import { LoaderProvider } from './src/Components/LoaderContext';
 import { initFirebase } from './src/Firebase/firebaseConfig';
 
 // Initialize Firebase once at app start
@@ -25,23 +26,25 @@ function App() {
   return (
     <SafeAreaProvider>
       <AlertProvider>
-        <StatusBar
-          barStyle={isDarkMode ? 'light-content' : 'dark-content'}
-          backgroundColor="transparent"
-          translucent
-        />
-        <NavigationContainer>
-          <Stack.Navigator
-            initialRouteName="Splash"
-            screenOptions={{ headerShown: false }}
-          >
-            <Stack.Screen name="Splash"       component={SplashScreen} />
-            <Stack.Screen name="Login"        component={LoginScreen} />
-            <Stack.Screen name="StartSurvey"  component={StartSurveyScreen} />
-            <Stack.Screen name="MapScreen"    component={MapScreen} />
-            <Stack.Screen name="Home"         component={HomeScreen} />
-          </Stack.Navigator>
-        </NavigationContainer>
+        <LoaderProvider>
+          <StatusBar
+            barStyle={isDarkMode ? 'light-content' : 'dark-content'}
+            backgroundColor="transparent"
+            translucent
+          />
+          <NavigationContainer>
+            <Stack.Navigator
+              initialRouteName="Splash"
+              screenOptions={{ headerShown: false }}
+            >
+              <Stack.Screen name="Splash"       component={SplashScreen} />
+              <Stack.Screen name="Login"        component={LoginScreen} />
+              <Stack.Screen name="StartSurvey"  component={StartSurveyScreen} />
+              <Stack.Screen name="MapScreen"    component={MapScreen} />
+              <Stack.Screen name="Home"         component={HomeScreen} />
+            </Stack.Navigator>
+          </NavigationContainer>
+        </LoaderProvider>
       </AlertProvider>
     </SafeAreaProvider>
   );
