@@ -1,10 +1,11 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Dimensions, Animated, Easing, ActivityIndicator, Alert, StatusBar, } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Dimensions, Animated, Easing, ActivityIndicator, StatusBar, } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import LinearGradient from 'react-native-linear-gradient';
 import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
 import { theme } from '../theme/appTheme';
 import { useAlert } from '../Components/AlertToast/AlertToast';
+import { useCommonAlert } from '../Components/CommonAlert/CommonAlert';
 import { checkAndStartSurvey, logoutSurveyor } from '../Actions/StartSurvey/StartSurveyAction';
 import { getUserDetails, saveUserDetails } from '../utils/storage';
 import { getData } from '../Firebase/dbServices';
@@ -17,6 +18,7 @@ const StartSurveyScreen = ({ navigation }) => {
     const slideAnim = useRef(new Animated.Value(24)).current;
     const rotateAnim = useRef(new Animated.Value(0)).current;
     const { showAlert } = useAlert();
+    const { showCommonAlert } = useCommonAlert();
     useEffect(() => {
         const loadUserName = async () => {
             const user = await getUserDetails();
@@ -61,14 +63,21 @@ const StartSurveyScreen = ({ navigation }) => {
     };
     const handleLogoutPress = () => {
         setMenuOpen(false);
-        Alert.alert('Logout', 'Are you sure you want to logout?', [
-            { text: 'Cancel', style: 'cancel' },
-            {
-                text: 'Logout',
-                style: 'destructive',
-                onPress: () => logoutSurveyor((screen) => navigation.navigate(screen), showAlert),
-            },
-        ]);
+        showCommonAlert({
+            title: 'Logout',
+            message: 'Are you sure you want to logout?',
+            icon: 'logout',
+            iconType: 'destructive',
+            buttons: [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                    text: 'Logout',
+                    style: 'destructive',
+                    icon: 'logout',
+                    onPress: () => logoutSurveyor((screen) => navigation.navigate(screen), showAlert),
+                },
+            ],
+        });
     };
     return (<SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
       <StatusBar barStyle="light-content" backgroundColor={theme.colors.gradientEnd}/>

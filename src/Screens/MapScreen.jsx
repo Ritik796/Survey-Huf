@@ -19,13 +19,17 @@ import FontAwesome6 from 'react-native-vector-icons/FontAwesome6';
 import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
 import Geolocation from '@react-native-community/geolocation';
 import MapView, { AnimatedRegion, Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
+import LinearGradient from 'react-native-linear-gradient';
 import { theme } from '../theme/appTheme';
 import CardDetailsModal from '../Components/MapScreen/CardDetailsModal';
 import { useLoader } from '../Components/LoaderContext';
 import { useAlert } from '../Components/AlertToast/AlertToast';
+import { useCommonAlert } from '../Components/CommonAlert/CommonAlert';
 import { loadLineHousesAction, loadWardLinesAction } from '../Actions/Map/MapAction';
+import { logoutSurveyor } from '../Actions/StartSurvey/StartSurveyAction';
 import { flushPendingSurveyImageUploads, saveSurveyDetails } from '../Services/Map/SurveySaveService';
 import { getUserDetails } from '../utils/storage';
+import SurveySettings from '../constants/SurveySettings.json';
 
 const { height, width } = Dimensions.get('window');
 const cardWidthGrid = (width - 40 - 20) / 3;
@@ -33,12 +37,9 @@ const HOUSE_MARKER_ICON = require('../assets/images/house.png');
 const HOUSE_MARKER_DONE_ICON = require('../assets/images/green_marker.png');
 const USER_MARKER_ICON = require('../assets/images/person.png');
 
-const DEFAULT_REGION = {
-  latitude: 28.6139,
-  longitude: 77.2090,
-  latitudeDelta: 0.012,
-  longitudeDelta: 0.012,
-};
+const { survey: surveySettings, map: mapSettings, location: locationSettings, sync: syncSettings, messages: msg } = SurveySettings;
+
+const DEFAULT_REGION = mapSettings.defaultRegion;
 
 const getRegionFromPoints = (points = []) => {
   if (!Array.isArray(points) || points.length === 0) {
@@ -59,6 +60,48 @@ const getRegionFromPoints = (points = []) => {
     longitudeDelta: Math.max((maxLng - minLng) * 1.8, 0.005),
   };
 };
+
+const getDistanceMeters = (lat1, lon1, lat2, lon2) => {
+  const R = 6371000;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLon = ((lon2 - lon1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) *
+    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+};
+
+const formatDistanceForDisplay = (metersRaw) => {
+  const meters = Number(metersRaw);
+  if (!Number.isFinite(meters) || meters < 0) return '0 मीटर';
+  if (meters >= 1000) {
+    const km = meters / 1000;
+    const kmText = km >= 10 ? km.toFixed(1) : km.toFixed(2);
+    return `${kmText.replace(/\.0+$/, '').replace(/(\.\d*[1-9])0+$/, '$1')} किलो मीटर`;
+  }
+  return `${Math.round(meters)} मीटर`;
+};
+
+const getRangeSignature = (rangesRaw = []) => {
+  if (!Array.isArray(rangesRaw) || rangesRaw.length === 0) return 'all';
+  const cleaned = rangesRaw
+    .map((r) => ({
+      from: Number(r?.from),
+      to: Number(r?.to),
+    }))
+    .filter((r) => Number.isFinite(r.from) && Number.isFinite(r.to))
+    .sort((a, b) => (a.from - b.from) || (a.to - b.to));
+
+  if (cleaned.length === 0) return 'all';
+  return cleaned.map((r) => `${r.from}-${r.to}`).join('|');
+};
+
+const buildLineRangeCacheKey = (lineId, ranges = []) => (
+  `${String(lineId || '')}::${getRangeSignature(ranges)}`
+);
+
+const REQUIRED_SURVEY_DISTANCE = surveySettings.requiredDistanceMeters;
 
 const getLineEndBearing = (points = []) => {
   if (!Array.isArray(points) || points.length < 2) {
@@ -123,13 +166,14 @@ const markerStyles = StyleSheet.create({
 const MAP_SAVE_LOG = (...args) => console.log('[MapSaveFlow]', ...args);
 
 // ── Main Screen ────────────────────────────────────────────────────────────────
-const MapScreen = () => {
+const MapScreen = ({ navigation }) => {
   const [isExpanded, setIsExpanded] = useState(false);
   const [selectedCard, setSelectedCard] = useState(null);
   const [cardModalVisible, setCardModalVisible] = useState(false);
   const [cardWorkflowState, setCardWorkflowState] = useState({});
   const [wardLines, setWardLines] = useState([]);
   const [activeLineIndex, setActiveLineIndex] = useState(0);
+  const [lineCardRangesByLineId, setLineCardRangesByLineId] = useState({});
   const [wardLinesLoading, setWardLinesLoading] = useState(false);
   const [assignedWard, setAssignedWard] = useState('');
   const [lineHouses, setLineHouses] = useState([]);
@@ -138,7 +182,9 @@ const MapScreen = () => {
   const [locating, setLocating] = useState(false);
   const { showLoader, hideLoader } = useLoader();
   const { showAlert } = useAlert();
+  const { showCommonAlert } = useCommonAlert();
   const housesByLineRef = useRef({});
+  const currentLineId = wardLines[activeLineIndex]?.id || null;
 
   const mapRef = useRef(null);
   const locationWatchIdRef = useRef(null);
@@ -213,9 +259,10 @@ const MapScreen = () => {
   }, [getHouseStatus, lineHouses]);
 
   // ── Actions ──
-  const openCardModal = useCallback((house) => {
-    setSelectedCard(house);
-    if (String(house?.hufRfidNumber || '').trim()) {
+  const openCardModal = useCallback(async (house) => {
+    const isAlreadySurveyed = Boolean(String(house?.hufRfidNumber || '').trim());
+    if (isAlreadySurveyed) {
+      setSelectedCard(house);
       setCardWorkflowState((prev) => ({
         ...prev,
         [house.id]: {
@@ -224,9 +271,65 @@ const MapScreen = () => {
           saved: true,
         },
       }));
+      setCardModalVisible(true);
+      return;
     }
+
+    const cardLat = Number(house?.latitude);
+    const cardLng = Number(house?.longitude);
+    let userLat = Number(currentUserLocation?.latitude);
+    let userLng = Number(currentUserLocation?.longitude);
+    let locationLoaderShown = false;
+
+    if (!Number.isFinite(userLat) || !Number.isFinite(userLng)) {
+      locationLoaderShown = true;
+      showLoader('Fetching location...');
+      try {
+        const position = await new Promise((resolve, reject) => {
+          Geolocation.getCurrentPosition(resolve, reject, locationSettings.getCurrentPosition);
+        });
+        const latitude = Number(position?.coords?.latitude);
+        const longitude = Number(position?.coords?.longitude);
+        const accuracy = Number(position?.coords?.accuracy);
+        if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+          showAlert('error', msg.location.gpsTurnOn);
+          return;
+        }
+        if (Number.isFinite(accuracy) && accuracy > surveySettings.maxAcceptableAccuracyMeters) {
+          showAlert('error', msg.location.accuracyLow);
+          return;
+        }
+        updateUserLocation(latitude, longitude, false);
+        userLat = latitude;
+        userLng = longitude;
+      } catch (_error) {
+        showAlert('error', msg.location.gpsTurnOn);
+        return;
+      } finally {
+        if (locationLoaderShown) {
+          hideLoader();
+        }
+      }
+    }
+
+    if (
+      Number.isFinite(cardLat) && Number.isFinite(cardLng) &&
+      Number.isFinite(userLat) && Number.isFinite(userLng)
+    ) {
+      const dist = Math.round(getDistanceMeters(userLat, userLng, cardLat, cardLng));
+      if (dist > REQUIRED_SURVEY_DISTANCE) {
+        showAlert(
+          'error',
+          msg.distance.outOfRange
+            .replace('{{currentDistance}}', formatDistanceForDisplay(dist))
+            .replace('{{requiredDistance}}', formatDistanceForDisplay(REQUIRED_SURVEY_DISTANCE))
+        );
+        return;
+      }
+    }
+    setSelectedCard(house);
     setCardModalVisible(true);
-  }, []);
+  }, [currentUserLocation, hideLoader, showAlert, showLoader, updateUserLocation]);
 
   const handleQrScanned = useCallback(
     (scannedCode) => {
@@ -275,7 +378,7 @@ const MapScreen = () => {
 
   const runSaveProcess = useCallback(async (cardId) => {
     if (!cardId || !selectedCard?.id) return;
-    const lineNumber = String(currentLine?.id || '');
+    const lineNumber = String(currentLineId || '');
     const cardState = getCardState(cardId);
     const scanCardNumber = String(cardState?.qrData || '').trim();
     const cardImageUri = cardState?.cardImageUri || '';
@@ -306,12 +409,31 @@ const MapScreen = () => {
         hasCardImage: Boolean(cardImageUri),
         hasHouseImage: Boolean(houseImageUri),
       });
-      showAlert('error', 'सभी जरूरी सर्वे स्टेप पूरे करें।');
+      showAlert('error', msg.survey.missingFields);
       return;
     }
     if (!Number.isFinite(saveLatitude) || !Number.isFinite(saveLongitude)) {
-      showAlert('error', 'Current location not available. कृपया GPS on करके फिर से कोशिश करें।');
+      showAlert('error', msg.location.gpsUnavailable);
       return;
+    }
+
+    const cardLat = Number(selectedCard?.latitude);
+    const cardLng = Number(selectedCard?.longitude);
+    if (Number.isFinite(cardLat) && Number.isFinite(cardLng)) {
+      const userLat = Number(currentUserLocation?.latitude);
+      const userLng = Number(currentUserLocation?.longitude);
+      if (Number.isFinite(userLat) && Number.isFinite(userLng)) {
+        const distanceToCard = Math.round(getDistanceMeters(userLat, userLng, cardLat, cardLng));
+        if (distanceToCard > REQUIRED_SURVEY_DISTANCE) {
+          showAlert(
+            'error',
+            msg.distance.outOfRange
+              .replace('{{currentDistance}}', formatDistanceForDisplay(distanceToCard))
+              .replace('{{requiredDistance}}', formatDistanceForDisplay(REQUIRED_SURVEY_DISTANCE))
+          );
+          return;
+        }
+      }
     }
 
     setCardWorkflowState((prev) => ({
@@ -361,8 +483,8 @@ const MapScreen = () => {
           ? { ...house, hufRfidNumber: scanCardNumber }
           : house
       )));
-      if (currentLine?.id) {
-        const lineId = String(currentLine.id);
+      if (currentLineId) {
+        const lineId = String(currentLineId);
         const existing = housesByLineRef.current[lineId];
         if (Array.isArray(existing)) {
           housesByLineRef.current[lineId] = existing.map((house) => (
@@ -372,7 +494,7 @@ const MapScreen = () => {
           ));
         }
       }
-      showAlert('success', 'सर्वे डेटा सफलतापूर्वक सहेजा गया।');
+      showAlert('success', msg.survey.saveSuccess);
       setCardModalVisible(false);
       setSelectedCard(null);
 
@@ -389,11 +511,11 @@ const MapScreen = () => {
         ...prev,
         [cardId]: { ...prev[cardId], isSaving: false },
       }));
-      showAlert('error', error?.message || 'Survey save failed');
+      showAlert('error', error?.message || msg.survey.saveFailed);
     } finally {
       hideLoader();
     }
-  }, [assignedWard, currentLine?.id, currentUserLocation, getCardState, hideLoader, selectedCard, showAlert, showLoader]);
+  }, [assignedWard, currentLineId, currentUserLocation, getCardState, hideLoader, selectedCard, showAlert, showLoader]);
 
 
   const resetCurrentSurveyProgress = useCallback(() => {
@@ -439,7 +561,7 @@ const MapScreen = () => {
         key={item.id}
         style={[
           styles.houseCard,
-          isGrid && { width: cardWidthGrid, height: 122 },
+          isGrid && { width: cardWidthGrid, height: 138 },
           status === 'done' && styles.houseCardDone,
           status === 'progress' && styles.houseCardProgress,
           isSelected && styles.houseCardSelected,
@@ -538,10 +660,10 @@ const MapScreen = () => {
       userAnimatedCoordinate.setValue({ latitude, longitude });
       hasAnimatedToUserRef.current = true;
     } else {
-      userAnimatedCoordinate.timing({ latitude, longitude, duration: 800, useNativeDriver: false }).start();
+      userAnimatedCoordinate.timing({ latitude, longitude, duration: mapSettings.markerAnimateDuration, useNativeDriver: false }).start();
     }
     if (animateMap) {
-      mapRef.current?.animateToRegion({ latitude, longitude, latitudeDelta: 0.0045, longitudeDelta: 0.0045 }, 450);
+      mapRef.current?.animateToRegion({ latitude, longitude, latitudeDelta: mapSettings.locationAnimateRegion.latitudeDelta, longitudeDelta: mapSettings.locationAnimateRegion.longitudeDelta }, mapSettings.locationAnimateRegion.animateDuration);
     }
   }, [userAnimatedCoordinate]);
 
@@ -555,32 +677,32 @@ const MapScreen = () => {
         const accuracy = Number(position?.coords?.accuracy);
         setLocating(false);
         if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
-          showAlert('error', 'Location मिल नहीं सकी। GPS on करें।');
+          showAlert('error', msg.location.gpsTurnOn);
           return;
         }
-        if (Number.isFinite(accuracy) && accuracy > 25) {
-          showAlert('error', `Signal कमज़ोर है (${Math.round(accuracy)}m)। खुली जगह पर जाकर फिर try करें।`);
+        if (Number.isFinite(accuracy) && accuracy > surveySettings.maxAcceptableAccuracyMeters) {
+          showAlert('error', msg.location.accuracyLow);
           return;
         }
         updateUserLocation(latitude, longitude, true);
       },
       () => {
         setLocating(false);
-        showAlert('error', 'Location नहीं मिली। Location permission और internet check करें।');
+        showAlert('error', 'कृपया GPS / Location चालू करें।');
       },
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+      locationSettings.getCurrentPosition
     );
   }, [locating, showAlert, updateUserLocation]);
 
   const handleNavigateToLineStart = useCallback(() => {
     const startPoint = currentLine?.points?.[0];
     if (!startPoint) {
-      showAlert('error', 'Line start point available नहीं है।');
+      showAlert('error', msg.location.lineStartUnavailable);
       return;
     }
     const { latitude, longitude } = startPoint;
-    const googleNavUrl = `google.navigation:q=${latitude},${longitude}&mode=w`;
-    const fallbackUrl = `https://www.google.com/maps/dir/?api=1&destination=${latitude},${longitude}&travelmode=walking`;
+    const googleNavUrl = `google.navigation:q=${latitude},${longitude}&mode=d`;
+    const fallbackUrl = `https://www.google.com/maps/dir/?api=1&destination=${latitude},${longitude}&travelmode=driving`;
     Linking.canOpenURL(googleNavUrl)
       .then((supported) => Linking.openURL(supported ? googleNavUrl : fallbackUrl))
       .catch(() => Linking.openURL(fallbackUrl));
@@ -605,12 +727,14 @@ const MapScreen = () => {
         setAssignedWard(resp.ward || '');
         if (resp.ok && Array.isArray(resp.wardLines)) {
           setWardLines(resp.wardLines);
+          setLineCardRangesByLineId(resp.lineCardRanges || {});
           setActiveLineIndex(resp.initialLineIndex || 0);
           if (resp.wardLines[0]?.points?.length) {
             mapRef.current?.animateToRegion(getRegionFromPoints(resp.wardLines[0].points), 450);
           }
         } else {
           setWardLines([]);
+          setLineCardRangesByLineId({});
         }
       } finally {
         if (isMounted) {
@@ -629,9 +753,10 @@ const MapScreen = () => {
   useEffect(() => {
     const validLineIds = new Set(wardLines.map((line) => String(line.id)));
     const nextCache = {};
-    Object.entries(housesByLineRef.current).forEach(([lineId, houses]) => {
-      if (validLineIds.has(String(lineId))) {
-        nextCache[lineId] = houses;
+    Object.entries(housesByLineRef.current).forEach(([cacheKey, houses]) => {
+      const [lineIdPart] = String(cacheKey).split('::');
+      if (validLineIds.has(String(lineIdPart))) {
+        nextCache[cacheKey] = houses;
       }
     });
     housesByLineRef.current = nextCache;
@@ -641,13 +766,15 @@ const MapScreen = () => {
     let isMounted = true;
 
     const hydrateLineHouses = async () => {
-      if (!assignedWard || !currentLine?.id) {
+      if (!assignedWard || !currentLineId) {
         setLineHouses([]);
         return;
       }
 
-      const lineId = String(currentLine.id);
-      const cachedHouses = housesByLineRef.current[lineId];
+      const lineId = String(currentLineId);
+      const rangeForLine = lineCardRangesByLineId[lineId] || [];
+      const cacheKey = buildLineRangeCacheKey(lineId, rangeForLine);
+      const cachedHouses = housesByLineRef.current[cacheKey];
       if (Array.isArray(cachedHouses) && cachedHouses.length > 0) {
         setLineHouses(cachedHouses);
         return;
@@ -656,15 +783,19 @@ const MapScreen = () => {
       setHousesLoading(true);
       showLoader('Loading houses...');
       try {
-        const resp = await loadLineHousesAction({ ward: assignedWard, lineId });
+        const resp = await loadLineHousesAction({
+          ward: assignedWard,
+          lineId,
+          lineCardRanges: rangeForLine,
+        });
         if (!isMounted) return;
 
         if (resp.ok && Array.isArray(resp.houses)) {
           setLineHouses(resp.houses);
-          housesByLineRef.current[lineId] = resp.houses;
+          housesByLineRef.current[cacheKey] = resp.houses;
         } else {
           setLineHouses([]);
-          housesByLineRef.current[lineId] = [];
+          housesByLineRef.current[cacheKey] = [];
         }
       } finally {
         if (isMounted) {
@@ -678,7 +809,7 @@ const MapScreen = () => {
     return () => {
       isMounted = false;
     };
-  }, [assignedWard, currentLine?.id, showLoader, hideLoader]);
+  }, [assignedWard, currentLineId, lineCardRangesByLineId, showLoader, hideLoader]);
 
   useEffect(() => {
     let stopped = false;
@@ -697,7 +828,7 @@ const MapScreen = () => {
     };
 
     syncNow();
-    const intervalId = setInterval(syncNow, 20000);
+    const intervalId = setInterval(syncNow, syncSettings.intervalMs);
 
     return () => {
       stopped = true;
@@ -725,7 +856,7 @@ const MapScreen = () => {
     const startLocationTracking = async () => {
       const hasPermission = await requestLocationPermission();
       if (!hasPermission) {
-        showAlert('error', 'Location permission denied. कृपया location अनुमति दें।');
+        showAlert('error', msg.location.permissionDenied);
         return;
       }
 
@@ -744,14 +875,7 @@ const MapScreen = () => {
         (error) => {
           MAP_SAVE_LOG('location_watch_error', error?.message || error);
         },
-        {
-          enableHighAccuracy: true,
-          distanceFilter: 10,
-          interval: 5000,
-          fastestInterval: 3000,
-          timeout: 15000,
-          maximumAge: 2000,
-        }
+        locationSettings.watchPosition
       );
     };
 
@@ -779,12 +903,47 @@ const MapScreen = () => {
       <StatusBar barStyle="light-content" backgroundColor={theme.colors.gradientStart} translucent={false} />
 
       {/* ── Header ── */}
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Ward Prashant</Text>
-        <TouchableOpacity style={styles.headerMenuBtn}>
-          <MaterialIcons name="more-vert" size={24} color={theme.colors.white} />
+      <LinearGradient
+        colors={[theme.colors.gradientStart, theme.colors.gradientEnd]}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 0 }}
+        style={styles.header}
+      >
+        <View style={styles.headerLeft}>
+          <View style={styles.headerIconWrap}>
+            <MaterialIcons name="map" size={16} color="rgba(255,255,255,0.9)" />
+          </View>
+          <Text style={styles.headerTitle}>
+            {assignedWard ? `Ward: ${assignedWard}` : 'Survey Map'}
+          </Text>
+        </View>
+        <TouchableOpacity
+          style={styles.headerMenuBtn}
+          activeOpacity={0.8}
+          onPress={() => {
+            showCommonAlert({
+              title: 'Logout',
+              message: 'Are you sure you want to logout?',
+              icon: 'logout',
+              iconType: 'destructive',
+              buttons: [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                  text: 'Logout',
+                  style: 'destructive',
+                  icon: 'logout',
+                  onPress: () => logoutSurveyor(
+                    (screen) => navigation.navigate(screen),
+                    showAlert,
+                  ),
+                },
+              ],
+            });
+          }}
+        >
+          <MaterialIcons name="logout" size={20} color={theme.colors.white} />
         </TouchableOpacity>
-      </View>
+      </LinearGradient>
 
       {/* ── Map ── */}
       <View style={styles.mapArea}>
@@ -843,8 +1002,8 @@ const MapScreen = () => {
             />
           ))}
           {currentUserLocation ? (
-            <Marker
-              coordinate={currentUserLocation}
+            <Marker.Animated
+              coordinate={userAnimatedCoordinate}
               anchor={{ x: 0.5, y: 0.5 }}
             >
               <Image
@@ -852,7 +1011,7 @@ const MapScreen = () => {
                 style={styles.userMarkerIcon}
                 resizeMode="contain"
               />
-            </Marker>
+            </Marker.Animated>
           ) : null}
         </MapView>
       </View>
@@ -924,18 +1083,42 @@ const MapScreen = () => {
 
         {/* Sheet Header */}
         <View style={styles.sheetHeader}>
-          <Text style={styles.sheetTitle}>Select House</Text>
-          <View style={styles.totalPill}>
-            <MaterialIcons name="home-work" size={13} color={theme.colors.gradientEnd} />
-            <Text style={styles.totalPillText}>{surveyStats.total}</Text>
+          <Text style={styles.sheetTitle}>Houses</Text>
+          <View style={styles.statsRow}>
+            <View style={styles.statChipDone}>
+              <MaterialIcons name="check-circle" size={11} color={theme.colors.gradientEnd} />
+              <Text style={[styles.statChipText, { color: theme.colors.gradientEnd }]}>{surveyStats.done}</Text>
+            </View>
+            {surveyStats.inProgress > 0 && (
+              <View style={styles.statChipProgress}>
+                <MaterialIcons name="pending" size={11} color="#d97706" />
+                <Text style={[styles.statChipText, { color: '#d97706' }]}>{surveyStats.inProgress}</Text>
+              </View>
+            )}
+            <View style={styles.statChipTotal}>
+              <MaterialIcons name="home-work" size={11} color="#64748b" />
+              <Text style={[styles.statChipText, { color: '#64748b' }]}>{surveyStats.total}</Text>
+            </View>
           </View>
         </View>
+
+        {/* Progress bar */}
+        {surveyStats.total > 0 && (
+          <View style={styles.progressBarBg}>
+            <View
+              style={[
+                styles.progressBarFill,
+                { width: `${Math.round((surveyStats.done / surveyStats.total) * 100)}%` },
+              ]}
+            />
+          </View>
+        )}
 
         {/* Houses List / Grid */}
         <View style={styles.listContainer}>
           {isExpanded ? (
             <ScrollView
-              key="vertical-grid"
+              key={`vertical-grid-${currentLineId || 'na'}`}
               showsVerticalScrollIndicator={false}
               contentContainerStyle={styles.housesGrid}
             >
@@ -943,7 +1126,7 @@ const MapScreen = () => {
             </ScrollView>
           ) : (
             <ScrollView
-              key="horizontal-list"
+              key={`horizontal-list-${currentLineId || 'na'}`}
               horizontal
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={styles.housesScroll}
@@ -959,6 +1142,8 @@ const MapScreen = () => {
         visible={cardModalVisible}
         card={selectedCard}
         cardData={getCardState(selectedCard?.id)}
+        ward={assignedWard}
+        lineId={currentLine?.id}
         onClose={handleProcessCloseAndReset}
         onQrScanned={handleQrScanned}
         onCardImageCaptured={handleCardImageCaptured}
@@ -978,12 +1163,11 @@ const styles = StyleSheet.create({
 
   // ── Header ──
   header: {
-    backgroundColor: theme.colors.gradientStart,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 14,
-    paddingVertical: 12,
+    paddingVertical: 10,
     elevation: 6,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 3 },
@@ -991,11 +1175,31 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     zIndex: 10,
   },
+  headerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    flex: 1,
+  },
+  headerIconWrap: {
+    width: 32,
+    height: 32,
+    borderRadius: 9,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   headerTitle: {
-    fontSize: 17,
-    fontWeight: '700',
+    fontSize: 15,
+    fontWeight: '800',
     color: theme.colors.white,
     letterSpacing: 0.3,
+  },
+  headerSubtitle: {
+    fontSize: 11,
+    fontWeight: '500',
+    color: 'rgba(255,255,255,0.75)',
+    marginTop: 1,
   },
   headerMenuBtn: {
     width: 36,
@@ -1009,7 +1213,7 @@ const styles = StyleSheet.create({
   // ── Map ──
   mapArea: {
     position: 'absolute',
-    top: 65,
+    top: 76,
     left: 0,
     right: 0,
     bottom: 0,
@@ -1056,7 +1260,7 @@ const styles = StyleSheet.create({
   // ── Overlays ──
   overlaysContainer: {
     position: 'absolute',
-    top: 65 + 14,
+    top: 76 + 14,
     left: 14,
     right: 14,
     zIndex: 5,
@@ -1113,17 +1317,17 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   mapActionBtn: {
-    width: 44,
-    height: 44,
-    borderRadius: 10,
-    backgroundColor: 'rgba(255,255,255,0.97)',
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    backgroundColor: '#ffffff',
     justifyContent: 'center',
     alignItems: 'center',
-    elevation: 4,
+    elevation: 6,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.15,
-    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.18,
+    shadowRadius: 6,
   },
 
   // ── Bottom Sheet ──
@@ -1186,6 +1390,61 @@ const styles = StyleSheet.create({
     color: theme.colors.gradientEnd,
   },
 
+  statsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  statChipDone: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    backgroundColor: '#f0fdf4',
+    borderWidth: 1,
+    borderColor: '#bbf7d0',
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: 20,
+  },
+  statChipProgress: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    backgroundColor: '#fffbeb',
+    borderWidth: 1,
+    borderColor: '#fde68a',
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: 20,
+  },
+  statChipTotal: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    backgroundColor: '#f1f5f9',
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: 20,
+  },
+  statChipText: {
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  progressBarBg: {
+    height: 3,
+    backgroundColor: '#e2e8f0',
+    marginHorizontal: 20,
+    marginBottom: 12,
+    borderRadius: 4,
+    overflow: 'hidden',
+  },
+  progressBarFill: {
+    height: '100%',
+    backgroundColor: theme.colors.gradientStart,
+    borderRadius: 4,
+  },
   listContainer: { flex: 1 },
   housesScroll: {
     paddingHorizontal: 20,
@@ -1205,7 +1464,7 @@ const styles = StyleSheet.create({
   // ── House Card ──
   houseCard: {
     width: 124,
-    height: 134,
+    height: 150,
     backgroundColor: '#fff',
     borderRadius: 14,
     borderWidth: 1.5,
@@ -1271,11 +1530,15 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 9,
-    paddingVertical: 8,
+    paddingVertical: 7,
     borderTopWidth: 1,
     borderTopColor: '#f1f5f9',
     gap: 3,
     backgroundColor: '#fff',
+  },
+  houseCardFooterNumbers: {
+    flex: 1,
+    gap: 2,
   },
   houseCardFooterDone: {
     backgroundColor: '#f0fdf4',
@@ -1290,6 +1553,14 @@ const styles = StyleSheet.create({
   houseCardNumberDone: {
     color: theme.colors.gradientEnd,
   },
+  houseCardHuf: {
+    fontSize: 9,
+    fontWeight: '600',
+    color: '#64748b',
+    letterSpacing: 0.3,
+  },
 });
 
 export default MapScreen;
+
+

@@ -5,6 +5,7 @@ import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 
 import { AlertProvider } from './src/Components/AlertToast/AlertToast';
+import { CommonAlertProvider } from './src/Components/CommonAlert/CommonAlert';
 import { LoaderProvider } from './src/Components/LoaderContext';
 import { initFirebase } from './src/Firebase/firebaseConfig';
 
@@ -26,6 +27,7 @@ function App() {
   return (
     <SafeAreaProvider>
       <AlertProvider>
+        <CommonAlertProvider>
         <LoaderProvider>
           <StatusBar
             barStyle={isDarkMode ? 'light-content' : 'dark-content'}
@@ -45,6 +47,7 @@ function App() {
             </Stack.Navigator>
           </NavigationContainer>
         </LoaderProvider>
+        </CommonAlertProvider>
       </AlertProvider>
     </SafeAreaProvider>
   );

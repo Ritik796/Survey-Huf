@@ -28,7 +28,7 @@ jobs:
         id: config
         shell: bash
         run: |
-          VERSION=$(node -e "const fs=require('fs'); const appv=fs.readFileSync('src/constants/appVersion.js','utf8'); const rel=(appv.match(/RELEASE_VERSION\\s*=\\s*['\\\"]([^'\\\"]+)['\\\"]/ )||[])[1]; const pkg=JSON.parse(fs.readFileSync('package.json','utf8')).version; process.stdout.write((rel || pkg || '1.0.0').trim());")
+          VERSION=$(node -e "const fs=require('fs'); const gradle=fs.readFileSync('android/app/build.gradle','utf8'); const gradleVersion=(gradle.match(/versionName\\s+[\"']([^\"']+)[\"']/)||[])[1]; const appv=fs.readFileSync('src/constants/appVersion.js','utf8'); const rel=(appv.match(/RELEASE_VERSION\\s*=\\s*['\\\"]([^'\\\"]+)['\\\"]/ )||[])[1]; const pkg=JSON.parse(fs.readFileSync('package.json','utf8')).version; process.stdout.write((gradleVersion || rel || pkg || '1.0.0').trim());")
           PUBLISH_APK_DEFAULT=$(node -e "const fs=require('fs'); const appv=fs.readFileSync('src/constants/appVersion.js','utf8'); const publish=(appv.match(/PUBLISH_APK_BY_DEFAULT\\s*=\\s*(true|false)/)||[])[1]; process.stdout.write((publish || 'false').toLowerCase());")
           PUBLISH_OTA_DEFAULT=$(node -e "const fs=require('fs'); const appv=fs.readFileSync('src/constants/appVersion.js','utf8'); const publish=(appv.match(/PUBLISH_OTA_BY_DEFAULT\\s*=\\s*(true|false)/)||[])[1]; process.stdout.write((publish || 'false').toLowerCase());")
 

@@ -16,6 +16,7 @@ export const createOtaUpdateHandlers = ({ setOtaModal, pendingUpdateActionRef })
       visible: true,
       title: meta?.modalTitle || 'Naya Update Available',
       actionLabel: meta?.actionLabel || 'Abhi Update Karein',
+      updateType,
       progress: 0,
       status: status || 'Update available...',
       version: String(version || '').replace(/^v/i, ''),

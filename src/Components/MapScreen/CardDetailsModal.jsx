@@ -1,6 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Animated,
+  Easing,
   Image,
   Modal,
   ScrollView,
@@ -10,11 +12,51 @@ import {
   View,
 } from 'react-native';
 import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
+import LinearGradient from 'react-native-linear-gradient';
 import { Camera, useCameraDevice, useCodeScanner } from 'react-native-vision-camera';
 import { theme } from '../../theme/appTheme';
 
 const CORNER_SIZE = 22;
 const CORNER_THICKNESS = 3;
+
+// ── Module-level image load cache (survives modal re-mounts) ──────────────────
+const _imgLoadCache = {};
+
+// ── Cached network image — skips spinner if already loaded this session ───────
+const CachedNetworkImage = ({ uri, style }) => {
+  const [loaded, setLoaded] = useState(_imgLoadCache[uri] ?? false);
+  const [error, setError] = useState(false);
+  return (
+    <View style={[{ overflow: 'hidden' }, style]}>
+      {!loaded && !error && (
+        <View style={[StyleSheet.absoluteFill, styles.imgLoadingWrap]}>
+          <ActivityIndicator color={theme.colors.gradientEnd} />
+        </View>
+      )}
+      {error && (
+        <View style={[StyleSheet.absoluteFill, styles.imgLoadingWrap]}>
+          <MaterialIcons name="broken-image" size={28} color="#94a3b8" />
+          <Text style={styles.imgErrText}>Photo nahi mili</Text>
+        </View>
+      )}
+      {uri ? (
+        <Image
+          source={{ uri }}
+          style={[StyleSheet.absoluteFill, { opacity: loaded && !error ? 1 : 0 }]}
+          onLoad={() => { _imgLoadCache[uri] = true; setLoaded(true); }}
+          onError={() => setError(true)}
+        />
+      ) : null}
+    </View>
+  );
+};
+
+// ── Firebase Storage URL builder ──────────────────────────────────────────────
+const buildStorageUrl = (ward, lineId, cardNumber, fileName) => {
+  const path = `DevTest/HUFCardData/${ward}/${lineId}/${cardNumber}/${fileName}`;
+  const encoded = path.split('/').map(encodeURIComponent).join('%2F');
+  return `https://firebasestorage.googleapis.com/v0/b/devtest-62768.firebasestorage.app/o/${encoded}?alt=media`;
+};
 
 // ── Corner guides for camera frame ────────────────────────────────────────────
 const CameraCorners = () => (
@@ -31,6 +73,8 @@ const CardDetailsModal = ({
   visible,
   card,
   cardData,
+  ward,
+  lineId,
   onClose,
   onQrScanned,
   onCardImageCaptured,
@@ -50,6 +94,20 @@ const CardDetailsModal = ({
   const onQrScannedRef = useRef(onQrScanned);
   onQrScannedRef.current = onQrScanned;
   const device = useCameraDevice('back');
+  const scanLineAnim = useRef(new Animated.Value(0)).current;
+
+  // Scanning line animation — runs while QR view is active
+  useEffect(() => {
+    if (view !== 'qr') return;
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(scanLineAnim, { toValue: 1, duration: 1800, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+        Animated.timing(scanLineAnim, { toValue: 0, duration: 1800, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [view, scanLineAnim]);
 
   const hasQr = Boolean(cardData?.qrData);
   const hasCardImage = Boolean(cardData?.cardImageUri);
@@ -76,13 +134,18 @@ const CardDetailsModal = ({
       hasScannedRef.current = false;
       return;
     }
+    // If already surveyed (has hufRfidNumber from Firebase), show read-only view
+    if (String(card?.hufRfidNumber || '').trim()) {
+      setView('surveyed');
+      return;
+    }
     const init = async () => {
       const status = await Camera.getCameraPermissionStatus();
       setPermissionStatus(status);
       if (status !== 'granted') requestPermission();
     };
     init();
-  }, [visible]);
+  }, [visible, card?.hufRfidNumber]);
 
   // ── QR Code Scanner ──
   const codeScanner = useCodeScanner({
@@ -184,9 +247,25 @@ const CardDetailsModal = ({
           <Text style={styles.cameraHintText}>कार्ड का QR कोड फ्रेम में रखें</Text>
           <View style={styles.scanFrame}>
             <CameraCorners />
+            {/* Animated scan line */}
+            <Animated.View
+              style={[
+                styles.scanLine,
+                {
+                  transform: [{
+                    translateY: scanLineAnim.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [0, 230],
+                    }),
+                  }],
+                },
+              ]}
+            />
           </View>
           <View style={styles.scanningRow}>
-            <MaterialIcons name="qr-code-scanner" size={16} color="rgba(255,255,255,0.8)" />
+            <Animated.View style={{ opacity: scanLineAnim.interpolate({ inputRange: [0, 0.5, 1], outputRange: [0.5, 1, 0.5] }) }}>
+              <MaterialIcons name="qr-code-scanner" size={16} color="#4ade80" />
+            </Animated.View>
             <Text style={styles.scanningText}>स्कैन हो रहा है...</Text>
           </View>
         </View>
@@ -276,163 +355,171 @@ const CardDetailsModal = ({
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        {/* Reference Photo */}
-        <Text style={styles.fieldLabel}>REFERENCE PHOTO</Text>
-        <View style={styles.refPhotoFrame}>
-          {card?.referenceImageUri ? (
-            <Image source={{ uri: card.referenceImageUri }} style={styles.refPhotoImage} />
-          ) : (
-            <View style={styles.refPhotoPlaceholder}>
-              <MaterialIcons name="home-work" size={32} color="#94a3b8" />
-              <Text style={styles.refPhotoPlaceholderText}>No reference photo available</Text>
-              <Text style={styles.refPhotoPlaceholderSub}>सुपरवाइजर से पूछें</Text>
+        {/* ── Reference Photo + Card Info combined hero ── */}
+        <View style={styles.heroCard}>
+          <View style={styles.refPhotoFrame}>
+            {card?.referenceImageUri ? (
+              <Image source={{ uri: card.referenceImageUri }} style={styles.refPhotoImage} />
+            ) : (
+              <View style={styles.refPhotoPlaceholder}>
+                <MaterialIcons name="home-work" size={36} color="#94a3b8" />
+                <Text style={styles.refPhotoPlaceholderText}>Reference photo nahi hai</Text>
+                <Text style={styles.refPhotoPlaceholderSub}>सुपरवाइजर से पूछें</Text>
+              </View>
+            )}
+            <View style={styles.refPhotoLabel}>
+              <MaterialIcons name="photo-library" size={11} color="rgba(255,255,255,0.85)" />
+              <Text style={styles.refPhotoLabelText}>Reference</Text>
             </View>
-          )}
-        </View>
-
-        {/* Card Number */}
-        <View style={styles.cardInfoRow}>
-          <View style={styles.cardIconCircle}>
-            <MaterialIcons name="credit-card" size={17} color={theme.colors.gradientEnd} />
           </View>
-          <View style={styles.cardInfoText}>
-            <Text style={styles.cardInfoLabel}>CARD NUMBER</Text>
-            <Text style={styles.cardInfoValue}>{card?.number || '—'}</Text>
+          {/* Card info bar below photo */}
+          <View style={styles.cardInfoBar}>
+            <View style={styles.cardInfoBarLeft}>
+              <View style={styles.cardIconCircle}>
+                <MaterialIcons name="credit-card" size={16} color={theme.colors.gradientEnd} />
+              </View>
+              <View>
+                <Text style={styles.cardInfoLabel}>CARD NUMBER</Text>
+                <Text style={styles.cardInfoValue}>{card?.number || '—'}</Text>
+              </View>
+            </View>
+            {isSaved && (
+              <View style={styles.savedBadge}>
+                <MaterialIcons name="verified" size={13} color={theme.colors.gradientEnd} />
+                <Text style={styles.savedBadgeText}>Saved</Text>
+              </View>
+            )}
           </View>
         </View>
 
         {/* Info hint before start */}
         {!hasQr && (
           <View style={styles.hintBox}>
-            <MaterialIcons name="info-outline" size={15} color="#3b82f6" />
+            <MaterialIcons name="lightbulb-outline" size={16} color="#f59e0b" />
             <Text style={styles.hintText}>
-              ऊपर दी पुरानी फोटो से पक्का करें कि आप सही घर पर हैं, फिर नीचे से सर्वे शुरू करें।
+              ऊपर दिखाई गई पुरानी फोटो से घर की पहचान सुनिश्चित करें, उसके बाद सर्वे शुरू करें।
             </Text>
           </View>
         )}
 
-        {/* ── Step 1: QR Scan ── */}
-        <View style={styles.stepCard}>
-          <View style={styles.stepCardHeader}>
-            <View style={[styles.stepBadge, hasQr && styles.stepBadgeDone]}>
-              {hasQr
-                ? <MaterialIcons name="check" size={13} color="#fff" />
-                : <Text style={styles.stepBadgeText}>1</Text>}
+        {/* ── Steps Section ── */}
+        <View style={styles.stepsSection}>
+
+          {/* Step 1: QR Scan */}
+          <View style={styles.stepRow}>
+            <View style={styles.stepLeft}>
+              <View style={[styles.stepCircle, hasQr ? styles.stepCircleDone : styles.stepCircleActive]}>
+                {hasQr
+                  ? <MaterialIcons name="check" size={15} color="#fff" />
+                  : <MaterialIcons name="qr-code-scanner" size={15} color="#fff" />}
+              </View>
+              <View style={[styles.stepConnector, hasQr && styles.stepConnectorDone]} />
             </View>
-            <Text style={[styles.stepTitle, hasQr && styles.stepTitleDone]}>QR Code Scan</Text>
-            {hasQr && (
-              <TouchableOpacity style={styles.stepRetakeBtn} onPress={() => setView('qr')} activeOpacity={0.8}>
-                <MaterialIcons name="refresh" size={13} color={theme.colors.gradientEnd} />
-                <Text style={styles.stepRetakeBtnText}>Rescan</Text>
-              </TouchableOpacity>
-            )}
+            <View style={[styles.stepContent, { marginBottom: 8 }]}>
+              <View style={styles.stepTitleRow}>
+                <Text style={[styles.stepLabel, hasQr && styles.stepLabelDone]}>QR Code Scan</Text>
+                {hasQr && (
+                  <TouchableOpacity style={styles.stepRetakeBtn} onPress={() => { hasScannedRef.current = false; setView('qr'); }} activeOpacity={0.8}>
+                    <MaterialIcons name="refresh" size={12} color={theme.colors.gradientEnd} />
+                    <Text style={styles.stepRetakeBtnText}>Rescan</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+              {hasQr ? (
+                <View style={styles.qrDoneChip}>
+                  <MaterialIcons name="qr-code" size={13} color={theme.colors.gradientEnd} />
+                  <Text style={styles.qrDoneChipText} numberOfLines={1}>{cardData.qrData}</Text>
+                </View>
+              ) : (
+                <TouchableOpacity style={styles.stepActionBtn} onPress={() => setView('qr')} activeOpacity={0.85}>
+                  <MaterialIcons name="qr-code-scanner" size={18} color="#fff" />
+                  <Text style={styles.stepActionBtnText}>Scan QR Code</Text>
+                </TouchableOpacity>
+              )}
+            </View>
           </View>
 
-          {hasQr ? (
-            <View style={styles.qrDoneChip}>
-              <MaterialIcons name="qr-code" size={15} color={theme.colors.gradientEnd} />
-              <Text style={styles.qrDoneChipText} numberOfLines={1}>{cardData.qrData}</Text>
+          {/* Step 2: Card Photo */}
+          <View style={styles.stepRow}>
+            <View style={styles.stepLeft}>
+              <View style={[
+                styles.stepCircle,
+                hasCardImage ? styles.stepCircleDone : hasQr ? styles.stepCircleActive : styles.stepCircleIdle,
+              ]}>
+                {hasCardImage
+                  ? <MaterialIcons name="check" size={15} color="#fff" />
+                  : <MaterialIcons name="photo-camera" size={15} color={hasQr ? '#fff' : '#94a3b8'} />}
+              </View>
+              <View style={[styles.stepConnector, hasCardImage && styles.stepConnectorDone]} />
             </View>
-          ) : (
-            <TouchableOpacity style={styles.stepActionBtn} onPress={() => setView('qr')} activeOpacity={0.85}>
-              <MaterialIcons name="qr-code-scanner" size={19} color="#fff" />
-              <Text style={styles.stepActionBtnText}>Scan QR Code</Text>
-            </TouchableOpacity>
-          )}
-        </View>
-
-        {/* ── Step 2: Card Photo ── */}
-        <View style={[styles.stepCard, !hasQr && styles.stepCardDisabled]}>
-          <View style={styles.stepCardHeader}>
-            <View style={[
-              styles.stepBadge,
-              hasCardImage && styles.stepBadgeDone,
-              hasQr && !hasCardImage && styles.stepBadgeActive,
-            ]}>
-              {hasCardImage
-                ? <MaterialIcons name="check" size={13} color="#fff" />
-                : <Text style={[styles.stepBadgeText, hasQr && !hasCardImage && styles.stepBadgeTextActive]}>2</Text>}
+            <View style={[styles.stepContent, !hasQr && styles.stepContentMuted, { marginBottom: 8 }]}>
+              <View style={styles.stepTitleRow}>
+                <Text style={[styles.stepLabel, hasCardImage && styles.stepLabelDone, !hasQr && styles.stepLabelMuted]}>Card Photo</Text>
+                {hasCardImage && (
+                  <TouchableOpacity style={styles.stepRetakeBtn} onPress={() => openCamera('card')} activeOpacity={0.8}>
+                    <MaterialIcons name="refresh" size={12} color={theme.colors.gradientEnd} />
+                    <Text style={styles.stepRetakeBtnText}>Retake</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+              {hasCardImage ? (
+                <Image source={{ uri: cardData.cardImageUri }} style={styles.capturedThumb} />
+              ) : (
+                <TouchableOpacity
+                  style={[styles.stepActionBtn, !hasQr && styles.stepActionBtnDisabled]}
+                  onPress={() => hasQr && openCamera('card')}
+                  disabled={!hasQr}
+                  activeOpacity={0.85}
+                >
+                  <MaterialIcons name="photo-camera" size={18} color={hasQr ? '#fff' : '#94a3b8'} />
+                  <Text style={[styles.stepActionBtnText, !hasQr && styles.stepActionBtnTextDisabled]}>
+                    Take Card Photo
+                  </Text>
+                </TouchableOpacity>
+              )}
             </View>
-            <Text style={[
-              styles.stepTitle,
-              hasCardImage && styles.stepTitleDone,
-              hasQr && !hasCardImage && styles.stepTitleActive,
-              !hasQr && styles.stepTitleMuted,
-            ]}>
-              Card Photo
-            </Text>
-            {hasCardImage && (
-              <TouchableOpacity style={styles.stepRetakeBtn} onPress={() => openCamera('card')} activeOpacity={0.8}>
-                <MaterialIcons name="refresh" size={13} color={theme.colors.gradientEnd} />
-                <Text style={styles.stepRetakeBtnText}>Retake</Text>
-              </TouchableOpacity>
-            )}
           </View>
 
-          {hasCardImage ? (
-            <View>
-              <Image source={{ uri: cardData.cardImageUri }} style={styles.capturedThumb} />
+          {/* Step 3: House Photo */}
+          <View style={[styles.stepRow, { marginBottom: 0 }]}>
+            <View style={styles.stepLeft}>
+              <View style={[
+                styles.stepCircle,
+                hasHouseImage ? styles.stepCircleDone : hasCardImage ? styles.stepCircleActive : styles.stepCircleIdle,
+              ]}>
+                {hasHouseImage
+                  ? <MaterialIcons name="check" size={15} color="#fff" />
+                  : <MaterialIcons name="home" size={15} color={hasCardImage ? '#fff' : '#94a3b8'} />}
+              </View>
             </View>
-          ) : (
-            <TouchableOpacity
-              style={[styles.stepActionBtn, !hasQr && styles.stepActionBtnDisabled]}
-              onPress={() => hasQr && openCamera('card')}
-              disabled={!hasQr}
-              activeOpacity={0.85}
-            >
-              <MaterialIcons name="photo-camera" size={19} color={hasQr ? '#fff' : '#94a3b8'} />
-              <Text style={[styles.stepActionBtnText, !hasQr && styles.stepActionBtnTextDisabled]}>
-                Take Card Photo
-              </Text>
-            </TouchableOpacity>
-          )}
-        </View>
-
-        {/* ── Step 3: House Photo ── */}
-        <View style={[styles.stepCard, !hasCardImage && styles.stepCardDisabled]}>
-          <View style={styles.stepCardHeader}>
-            <View style={[
-              styles.stepBadge,
-              hasHouseImage && styles.stepBadgeDone,
-              hasCardImage && !hasHouseImage && styles.stepBadgeActive,
-            ]}>
-              {hasHouseImage
-                ? <MaterialIcons name="check" size={13} color="#fff" />
-                : <Text style={[styles.stepBadgeText, hasCardImage && !hasHouseImage && styles.stepBadgeTextActive]}>3</Text>}
+            <View style={[styles.stepContent, !hasCardImage && styles.stepContentMuted]}>
+              <View style={styles.stepTitleRow}>
+                <Text style={[styles.stepLabel, hasHouseImage && styles.stepLabelDone, !hasCardImage && styles.stepLabelMuted]}>House Photo</Text>
+                {hasHouseImage && (
+                  <TouchableOpacity style={styles.stepRetakeBtn} onPress={() => openCamera('house')} activeOpacity={0.8}>
+                    <MaterialIcons name="refresh" size={12} color={theme.colors.gradientEnd} />
+                    <Text style={styles.stepRetakeBtnText}>Retake</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+              {hasHouseImage ? (
+                <Image source={{ uri: cardData.houseImageUri }} style={styles.capturedThumb} />
+              ) : (
+                <TouchableOpacity
+                  style={[styles.stepActionBtn, !hasCardImage && styles.stepActionBtnDisabled]}
+                  onPress={() => hasCardImage && openCamera('house')}
+                  disabled={!hasCardImage}
+                  activeOpacity={0.85}
+                >
+                  <MaterialIcons name="home" size={18} color={hasCardImage ? '#fff' : '#94a3b8'} />
+                  <Text style={[styles.stepActionBtnText, !hasCardImage && styles.stepActionBtnTextDisabled]}>
+                    Take House Photo
+                  </Text>
+                </TouchableOpacity>
+              )}
             </View>
-            <Text style={[
-              styles.stepTitle,
-              hasHouseImage && styles.stepTitleDone,
-              hasCardImage && !hasHouseImage && styles.stepTitleActive,
-              !hasCardImage && styles.stepTitleMuted,
-            ]}>
-              House Photo
-            </Text>
-            {hasHouseImage && (
-              <TouchableOpacity style={styles.stepRetakeBtn} onPress={() => openCamera('house')} activeOpacity={0.8}>
-                <MaterialIcons name="refresh" size={13} color={theme.colors.gradientEnd} />
-                <Text style={styles.stepRetakeBtnText}>Retake</Text>
-              </TouchableOpacity>
-            )}
           </View>
 
-          {hasHouseImage ? (
-            <View>
-              <Image source={{ uri: cardData.houseImageUri }} style={styles.capturedThumb} />
-            </View>
-          ) : (
-            <TouchableOpacity
-              style={[styles.stepActionBtn, !hasCardImage && styles.stepActionBtnDisabled]}
-              onPress={() => hasCardImage && openCamera('house')}
-              disabled={!hasCardImage}
-              activeOpacity={0.85}
-            >
-              <MaterialIcons name="home" size={19} color={hasCardImage ? '#fff' : '#94a3b8'} />
-              <Text style={[styles.stepActionBtnText, !hasCardImage && styles.stepActionBtnTextDisabled]}>
-                Take House Photo
-              </Text>
-            </TouchableOpacity>
-          )}
         </View>
       </ScrollView>
 
@@ -441,47 +528,137 @@ const CardDetailsModal = ({
         {isSaved ? (
           <View style={styles.savedRow}>
             <MaterialIcons name="check-circle" size={18} color="#16a34a" />
-            <Text style={styles.savedRowText}>Survey completed and saved</Text>
+            <Text style={styles.savedRowText}>Survey completed</Text>
           </View>
         ) : (
           <TouchableOpacity
-            style={[styles.saveBtn, !allDone && styles.saveBtnDisabled]}
+            style={styles.saveBtnWrapper}
             onPress={allDone ? onVerifyAndSave : null}
             disabled={!allDone}
             activeOpacity={0.85}
           >
-            <MaterialIcons name="check-circle" size={20} color={allDone ? '#fff' : '#94a3b8'} />
-            <Text style={[styles.saveBtnText, !allDone && styles.saveBtnTextDisabled]}>
-              {allDone ? 'Verify and Save' : 'Complete all steps to save'}
-            </Text>
+            {allDone ? (
+              <LinearGradient
+                colors={[theme.colors.gradientStart, theme.colors.gradientEnd]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+                style={styles.saveBtn}
+              >
+                <MaterialIcons name="check-circle" size={20} color="#fff" />
+                <Text style={styles.saveBtnText}>Verify and Save</Text>
+              </LinearGradient>
+            ) : (
+              <View style={[styles.saveBtn, styles.saveBtnDisabled]}>
+                <MaterialIcons name="check-circle" size={20} color="#94a3b8" />
+                <Text style={[styles.saveBtnText, styles.saveBtnTextDisabled]}>
+                  Complete all steps to save
+                </Text>
+              </View>
+            )}
           </TouchableOpacity>
         )}
       </View>
     </>
   );
 
+  // ── RENDER: Surveyed House Details View ──
+  const renderSurveyedView = () => {
+    const hufNumber  = String(card?.hufRfidNumber || '').trim();
+    const cardNumber = String(card?.number || '').trim();
+    const cardImgUrl  = (ward && lineId && cardNumber && hufNumber)
+      ? buildStorageUrl(ward, lineId, cardNumber, `${hufNumber}.jpg`)
+      : null;
+    const houseImgUrl = (ward && lineId && cardNumber)
+      ? buildStorageUrl(ward, lineId, cardNumber, 'houseImg.jpg')
+      : null;
+
+    return (
+      <>
+        <ScrollView
+          style={styles.scrollBody}
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+        >
+          {/* HUF Number info card */}
+          <View style={styles.hufInfoCard}>
+            <View style={styles.hufIconCircle}>
+              <MaterialIcons name="nfc" size={22} color={theme.colors.gradientEnd} />
+            </View>
+            <View style={styles.hufInfoText}>
+              <Text style={styles.hufLabel}>HUF RFID NUMBER</Text>
+              <Text style={styles.hufValue}>{hufNumber}</Text>
+            </View>
+            <View style={styles.surveyedBadge}>
+              <MaterialIcons name="verified" size={12} color={theme.colors.gradientEnd} />
+              <Text style={styles.surveyedBadgeText}>Surveyed</Text>
+            </View>
+          </View>
+
+          {/* Card Number info */}
+          <View style={styles.cardNumRow}>
+            <View style={styles.cardNumIconCircle}>
+              <MaterialIcons name="credit-card" size={16} color={theme.colors.gradientEnd} />
+            </View>
+            <View>
+              <Text style={styles.cardNumLabel}>CARD NUMBER</Text>
+              <Text style={styles.cardNumValue}>{cardNumber || '—'}</Text>
+            </View>
+          </View>
+
+          {/* Card Photo */}
+          <View style={styles.surveyedImgCard}>
+            <View style={styles.surveyedImgCardHeader}>
+              <MaterialIcons name="credit-card" size={15} color={theme.colors.gradientEnd} />
+              <Text style={styles.surveyedImgCardTitle}>Card Photo</Text>
+            </View>
+            <CachedNetworkImage uri={cardImgUrl} style={styles.surveyedImg} />
+          </View>
+
+          {/* House Photo */}
+          <View style={styles.surveyedImgCard}>
+            <View style={styles.surveyedImgCardHeader}>
+              <MaterialIcons name="home" size={15} color={theme.colors.gradientEnd} />
+              <Text style={styles.surveyedImgCardTitle}>House Photo</Text>
+            </View>
+            <CachedNetworkImage uri={houseImgUrl} style={styles.surveyedImg} />
+          </View>
+        </ScrollView>
+      </>
+    );
+  };
+
   // ── Header config per view ──
   const headerMap = {
-    form:    { title: 'House Details',                          icon: 'home-work',       dark: false },
-    qr:      { title: 'Scan QR', icon: 'qr-code-scanner', dark: true },
-    camera:  { title: captureType === 'card' ? 'Card Photo' : 'House Photo', icon: captureType === 'card' ? 'credit-card' : 'home', dark: true },
-    preview: { title: 'Preview Photo',                          icon: 'photo',           dark: true },
+    form:     { title: 'House Details',                         icon: 'home-work',       dark: false },
+    surveyed: { title: 'Survey Details',                        icon: 'verified',        dark: false },
+    qr:       { title: 'Scan QR',                               icon: 'qr-code-scanner', dark: true },
+    camera:   { title: captureType === 'card' ? 'Card Photo' : 'House Photo', icon: captureType === 'card' ? 'credit-card' : 'home', dark: true },
+    preview:  { title: 'Preview Photo',                         icon: 'photo',           dark: true },
   };
   const { title: hTitle, icon: hIcon, dark: hDark } = headerMap[view] || headerMap.form;
+
+  const isTopLevel = view === 'form' || view === 'surveyed';
 
   return (
     <Modal
       visible={visible}
       transparent={false}
       animationType="slide"
-      onRequestClose={view !== 'form' ? handleBackToForm : onClose}
+      onRequestClose={isTopLevel ? onClose : handleBackToForm}
     >
       <View style={[styles.container, hDark && styles.containerDark]}>
 
         {/* ── Header ── */}
-        <View style={[styles.header, hDark && styles.headerDark]}>
+        <LinearGradient
+          colors={hDark
+            ? ['rgba(0,0,0,0.65)', 'rgba(0,0,0,0.55)']
+            : [theme.colors.gradientStart, theme.colors.gradientEnd]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 0 }}
+          style={[styles.header, hDark && styles.headerDark]}
+        >
           <View style={styles.headerLeft}>
-            {view !== 'form' && (
+            {!isTopLevel && (
               <TouchableOpacity onPress={handleBackToForm} hitSlop={10} style={styles.backBtn}>
                 <MaterialIcons name="arrow-back" size={18} color="rgba(255,255,255,0.9)" />
               </TouchableOpacity>
@@ -491,7 +668,7 @@ const CardDetailsModal = ({
             </View>
             <Text style={styles.headerTitle}>{hTitle}</Text>
           </View>
-          {view === 'form' && (
+          {isTopLevel && (
             <TouchableOpacity
               onPress={onClose}
               hitSlop={12}
@@ -500,14 +677,15 @@ const CardDetailsModal = ({
               <MaterialIcons name="close" size={20} color="rgba(255,255,255,0.9)" />
             </TouchableOpacity>
           )}
-        </View>
+        </LinearGradient>
 
         {/* ── Body ── */}
         <View style={styles.body}>
-          {view === 'form'    && renderFormView()}
-          {view === 'qr'     && renderQrView()}
-          {view === 'camera' && renderCameraView()}
-          {view === 'preview'&& renderPreviewView()}
+          {view === 'form'     && renderFormView()}
+          {view === 'surveyed' && renderSurveyedView()}
+          {view === 'qr'       && renderQrView()}
+          {view === 'camera'   && renderCameraView()}
+          {view === 'preview'  && renderPreviewView()}
         </View>
       </View>
     </Modal>
@@ -525,7 +703,6 @@ const styles = StyleSheet.create({
 
   // ── Header ──
   header: {
-    backgroundColor: theme.colors.gradientStart,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -538,7 +715,6 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
   },
   headerDark: {
-    backgroundColor: 'rgba(0,0,0,0.55)',
     elevation: 0,
     shadowOpacity: 0,
   },
@@ -589,22 +765,24 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingTop: 16,
     paddingBottom: 20,
-    gap: 12,
+    gap: 14,
   },
 
-  fieldLabel: {
-    fontSize: 10,
-    fontWeight: '800',
-    color: '#64748b',
-    letterSpacing: 0.7,
-  },
-
-  refPhotoFrame: {
-    height: 160,
-    borderRadius: 12,
+  // ── Hero Card (photo + card info) ──
+  heroCard: {
+    borderRadius: 14,
     overflow: 'hidden',
     borderWidth: 1.5,
     borderColor: '#e2e8f0',
+    backgroundColor: '#fff',
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 6,
+  },
+  refPhotoFrame: {
+    height: 170,
     backgroundColor: '#f8fafc',
   },
   refPhotoImage: {
@@ -616,11 +794,11 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    gap: 6,
+    gap: 8,
   },
   refPhotoPlaceholderText: {
     color: '#64748b',
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: '600',
   },
   refPhotoPlaceholderSub: {
@@ -628,7 +806,55 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '400',
   },
-
+  refPhotoLabel: {
+    position: 'absolute',
+    top: 10,
+    left: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 20,
+  },
+  refPhotoLabelText: {
+    color: 'rgba(255,255,255,0.9)',
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+  },
+  cardInfoBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderTopWidth: 1,
+    borderTopColor: '#f1f5f9',
+    backgroundColor: '#fff',
+  },
+  cardInfoBarLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  savedBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#f0fdf4',
+    borderWidth: 1,
+    borderColor: '#bbf7d0',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 20,
+  },
+  savedBadgeText: {
+    color: theme.colors.gradientEnd,
+    fontSize: 11,
+    fontWeight: '700',
+  },
   cardInfoRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -640,12 +866,90 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   cardIconCircle: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
     backgroundColor: '#e8f5e9',
     justifyContent: 'center',
     alignItems: 'center',
+  },
+
+  // ── Steps Section ──
+  stepsSection: {
+    backgroundColor: '#fff',
+    borderRadius: 14,
+    borderWidth: 1.5,
+    borderColor: '#e2e8f0',
+    paddingHorizontal: 14,
+    paddingTop: 14,
+    paddingBottom: 6,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 6,
+  },
+  stepRow: {
+    flexDirection: 'row',
+    gap: 12,
+    marginBottom: 4,
+  },
+  stepLeft: {
+    alignItems: 'center',
+    width: 32,
+  },
+  stepCircle: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: theme.colors.gradientStart,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  stepCircleDone: {
+    backgroundColor: theme.colors.gradientEnd,
+  },
+  stepCircleActive: {
+    backgroundColor: theme.colors.gradientStart,
+  },
+  stepCircleIdle: {
+    backgroundColor: '#e2e8f0',
+  },
+  stepConnector: {
+    width: 2,
+    flex: 1,
+    minHeight: 12,
+    backgroundColor: '#e2e8f0',
+    borderRadius: 1,
+    marginVertical: 3,
+  },
+  stepConnectorDone: {
+    backgroundColor: theme.colors.gradientStart,
+  },
+  stepContent: {
+    flex: 1,
+    paddingBottom: 14,
+  },
+  stepContentMuted: {
+    opacity: 0.5,
+  },
+  stepTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+    minHeight: 32,
+  },
+  stepLabel: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#0f172a',
+  },
+  stepLabelDone: {
+    color: theme.colors.gradientEnd,
+  },
+  stepLabelMuted: {
+    color: '#94a3b8',
   },
   cardInfoText: { flex: 1, gap: 2 },
   cardInfoLabel: {
@@ -827,6 +1131,145 @@ const styles = StyleSheet.create({
     borderTopColor: '#f1f5f9',
     backgroundColor: '#fff',
   },
+  // ── Image loading wrapper ──
+  imgLoadingWrap: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#f8fafc',
+    gap: 6,
+  },
+  imgErrText: {
+    color: '#94a3b8',
+    fontSize: 11,
+    fontWeight: '500',
+    marginTop: 4,
+  },
+
+  // ── Surveyed View ──
+  hufInfoCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: '#f0fdf4',
+    borderRadius: 14,
+    borderWidth: 1.5,
+    borderColor: '#bbf7d0',
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    elevation: 1,
+    shadowColor: theme.colors.gradientEnd,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 6,
+  },
+  hufIconCircle: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: '#dcfce7',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  hufInfoText: {
+    flex: 1,
+  },
+  hufLabel: {
+    fontSize: 9,
+    fontWeight: '700',
+    color: '#64748b',
+    letterSpacing: 0.8,
+    marginBottom: 2,
+  },
+  hufValue: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: '#0f172a',
+    letterSpacing: 0.3,
+  },
+  surveyedBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#bbf7d0',
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 20,
+  },
+  surveyedBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: theme.colors.gradientEnd,
+  },
+  cardNumRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: '#e2e8f0',
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  cardNumIconCircle: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#e8f5e9',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  cardNumLabel: {
+    fontSize: 9,
+    fontWeight: '700',
+    color: '#94a3b8',
+    letterSpacing: 0.8,
+    marginBottom: 2,
+  },
+  cardNumValue: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: '#0f172a',
+  },
+  surveyedImgCard: {
+    backgroundColor: '#fff',
+    borderRadius: 14,
+    borderWidth: 1.5,
+    borderColor: '#e2e8f0',
+    overflow: 'hidden',
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 6,
+  },
+  surveyedImgCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f1f5f9',
+  },
+  surveyedImgCardTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#0f172a',
+  },
+  surveyedImg: {
+    height: 200,
+    backgroundColor: '#f8fafc',
+  },
+  saveBtnClose: {
+    backgroundColor: '#f1f5f9',
+  },
+  saveBtnTextClose: {
+    color: '#475569',
+  },
+
   savedRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -843,24 +1286,25 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '700',
   },
-  saveBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    backgroundColor: theme.colors.gradientStart,
+  saveBtnWrapper: {
     borderRadius: 12,
-    paddingVertical: 14,
+    overflow: 'hidden',
     elevation: 4,
     shadowColor: theme.colors.gradientEnd,
     shadowOffset: { width: 0, height: 5 },
     shadowOpacity: 0.35,
     shadowRadius: 8,
   },
+  saveBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    borderRadius: 12,
+    paddingVertical: 14,
+  },
   saveBtnDisabled: {
     backgroundColor: '#f1f5f9',
-    elevation: 0,
-    shadowOpacity: 0,
   },
   saveBtnText: {
     color: '#fff',
@@ -904,6 +1348,20 @@ const styles = StyleSheet.create({
     width: 240,
     height: 240,
     position: 'relative',
+    overflow: 'hidden',
+  },
+  scanLine: {
+    position: 'absolute',
+    left: 8,
+    right: 8,
+    height: 2,
+    borderRadius: 2,
+    backgroundColor: '#4ade80',
+    shadowColor: '#4ade80',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.9,
+    shadowRadius: 6,
+    elevation: 4,
   },
   // Capture frame for photos
   captureFrame: {

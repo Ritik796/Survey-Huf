@@ -63,7 +63,7 @@ const CommonLoader = ({ isLoading = false, text = 'Please wait...', smallArea = 
 const styles = StyleSheet.create({
   loaderOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(255, 255, 255, 0.96)',
+    backgroundColor: 'rgba(0, 0, 0, 0.1)',
     justifyContent: 'center',
     alignItems: 'center',
     zIndex: 99999,
@@ -74,7 +74,7 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: 'rgba(255, 255, 255, 0.96)',
+    backgroundColor: 'rgba(0, 0, 0, 0.1)',
     justifyContent: 'center',
     alignItems: 'center',
     zIndex: 99999,

@@ -141,12 +141,13 @@ export const checkForUpdates = async (callbacks = {}, runtimeConfig = null, opti
     }
 
     return true;
-  } catch (_error) {
+  } catch (error) {
+    onError?.(error);
     return false;
   }
 };
 
-const downloadOtaPackage = async (url, assetId, token, onProgress, onComplete) => {
+const downloadOtaPackage = async (url, assetId, token, onProgress, onComplete, onError) => {
   try {
     await safeDeletePath(OTA_PACKAGE_PATH);
 
@@ -178,12 +179,12 @@ const downloadOtaPackage = async (url, assetId, token, onProgress, onComplete) =
     } else {
       throw new Error(`Download failed with status ${result.statusCode}`);
     }
-  } catch (_error) {
-    // errors are handled silently to avoid blocking app launch
+  } catch (error) {
+    onError?.(error);
   }
 };
 
-const downloadLegacyBundle = async (url, assetId, token, onProgress, onComplete) => {
+const downloadLegacyBundle = async (url, assetId, token, onProgress, onComplete, onError) => {
   try {
     await safeDeletePath(OTA_PACKAGE_PATH);
 
@@ -209,7 +210,7 @@ const downloadLegacyBundle = async (url, assetId, token, onProgress, onComplete)
     } else {
       throw new Error(`Download failed with status ${result.statusCode}`);
     }
-  } catch (_error) {
-    // errors are handled silently to avoid blocking app launch
+  } catch (error) {
+    onError?.(error);
   }
 };

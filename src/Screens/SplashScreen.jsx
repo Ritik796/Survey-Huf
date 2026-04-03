@@ -23,6 +23,7 @@ const SplashScreen = ({ navigation }) => {
         visible: false,
         title: 'Naya Update Available',
         actionLabel: 'Abhi Update Karein',
+        updateType: 'js',
         progress: 0,
         status: '',
         version: '',
@@ -49,6 +50,18 @@ const SplashScreen = ({ navigation }) => {
     const onUpdatePress = useCallback(() => {
         const startUpdate = pendingUpdateActionRef.current;
         if (!startUpdate) return;
+        if (otaModal.updateType === 'native') {
+            setOtaModal((prev) => ({
+                ...prev,
+                canStartUpdate: false,
+                status: 'App band ho raha hai...',
+                showUnavailableMessage: false,
+                unavailableMessage: '',
+            }));
+            pendingUpdateActionRef.current = null;
+            startUpdate();
+            return;
+        }
         setOtaModal((prev) => ({
             ...prev,
             isDownloading: true,
@@ -59,7 +72,7 @@ const SplashScreen = ({ navigation }) => {
         }));
         pendingUpdateActionRef.current = null;
         startUpdate();
-    }, []);
+    }, [otaModal.updateType]);
 
     useEffect(() => {
         // Entrance animations (staggered)
@@ -121,7 +134,7 @@ const SplashScreen = ({ navigation }) => {
                 },
             };
 
-            await checkForUpdates(wrappedHandlers, null, { forceRefreshDb: true, skipNativeExit: true });
+            await checkForUpdates(wrappedHandlers, null, { forceRefreshDb: true, skipNativeExit: false });
         }, 1800);
 
         return () => {
