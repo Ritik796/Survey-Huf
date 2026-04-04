@@ -1,5 +1,11 @@
 ###############################################################################
-# 🔥 REQUIRED RULES – FIX R8 CRASH FOR RELEASE BUILD
+# R8 FULL MODE – smaller APK, better dead-code elimination
+###############################################################################
+-allowaccessmodification
+-repackageclasses ''
+
+###############################################################################
+# REQUIRED RULES – FIX R8 CRASH FOR RELEASE BUILD
 ###############################################################################
 
 # VisionCamera
