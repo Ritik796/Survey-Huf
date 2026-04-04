@@ -345,60 +345,26 @@ export const saveSurveyDetails = async ({
     await saveData(dbPath, payload);
     await updateData(houseCardPath, { hufRfidNumber: String(scanCardNumber || '') });
     SURVEY_SAVE_LOG('db:save:done', { dbPath });
-    let uploadMeta = null;
-    let queued = false;
-    let queueItem = null;
-    try {
-      uploadMeta = await uploadSurveyImages({
-        ward,
-        lineNumber,
-        cardNumber,
-        scanCardNumber,
-        cardImageUri,
-        houseImageUri,
-      });
-    } catch (uploadError) {
-      queued = true;
-      queueItem = await enqueuePendingUpload({
-        ward,
-        lineNumber,
-        cardNumber,
-        scanCardNumber,
-        cardImageUri,
-        houseImageUri,
-      });
-      SURVEY_SAVE_LOG('upload:queued_for_background', {
-        reason: uploadError?.message || String(uploadError),
-        queueItem,
-      });
-    }
+
+    const queueItem = await enqueuePendingUpload({
+      ward,
+      lineNumber,
+      cardNumber,
+      scanCardNumber,
+      cardImageUri,
+      houseImageUri,
+    });
+    SURVEY_SAVE_LOG('upload:queued_for_background', { queueItem });
 
     const response = {
       ok: true,
-      message: queued
-        ? 'Survey saved locally. Images will sync when network is available.'
-        : 'Survey details saved successfully',
+      message: 'Survey saved. Images will sync in background.',
       data: {
         dbPath,
         houseCardPath,
         payload,
-        fileSize: uploadMeta ? {
-          cardImageBytes: uploadMeta.cardPrepared.sizeBytes,
-          houseImageBytes: uploadMeta.housePrepared.sizeBytes,
-          limitBytes: MAX_IMAGE_SIZE_BYTES,
-          cardImageOriginalBytes: uploadMeta.cardPrepared.originalSizeBytes || uploadMeta.cardPrepared.sizeBytes,
-          houseImageOriginalBytes: uploadMeta.housePrepared.originalSizeBytes || uploadMeta.housePrepared.sizeBytes,
-          cardQualityUsed: uploadMeta.cardPrepared.qualityUsed,
-          houseQualityUsed: uploadMeta.housePrepared.qualityUsed,
-          cardOverLimit: uploadMeta.cardPrepared.overLimit,
-          houseOverLimit: uploadMeta.housePrepared.overLimit,
-        } : null,
-        queued,
+        queued: true,
         queueItemId: queueItem?.id || null,
-        uploads: {
-          cardImage: uploadMeta?.cardUpload || null,
-          houseImage: uploadMeta?.houseUpload || null,
-        },
       },
     };
     SURVEY_SAVE_LOG('saveSurveyDetails:success', response);
