@@ -1,47 +1,44 @@
-import { getApp as getRNApp, getApps as getRNApps, initializeApp as initializeRNApp } from '@react-native-firebase/app';
-import { getDatabase, ref, get, set, update } from '@react-native-firebase/database';
-import {
-  getStorage as getRNStorage,
-  ref as getRNStorageRef,
-  putFile as putRNFile,
-  getDownloadURL as getRNDownloadURL,
-} from '@react-native-firebase/storage';
 import { FIREBASE_CONFIG } from './firebaseConfig';
 
-// ─── Ensure native Firebase app is initialized ────────────────────────────────
-const ensureRNFirebaseDefaultApp = () => {
-  const existingApps = getRNApps();
-  if (existingApps.length > 0) return getRNApp();
-  return initializeRNApp({
-    apiKey:            FIREBASE_CONFIG.apiKey,
-    appId:             FIREBASE_CONFIG.appId,
-    projectId:         FIREBASE_CONFIG.projectId,
-    databaseURL:       FIREBASE_CONFIG.databaseURL,
-    storageBucket:     FIREBASE_CONFIG.storageBucket,
-    messagingSenderId: FIREBASE_CONFIG.messagingSenderId,
-  });
+// ─── Lazy app cache ───────────────────────────────────────────────────────────
+let _rnApp = null;
+
+const ensureApp = () => {
+  if (_rnApp) return _rnApp;
+  const { getApp, getApps, initializeApp } = require('@react-native-firebase/app');
+  const existing = getApps();
+  if (existing.length > 0) {
+    _rnApp = getApp();
+  } else {
+    _rnApp = initializeApp({
+      apiKey:            FIREBASE_CONFIG.apiKey,
+      appId:             FIREBASE_CONFIG.appId,
+      projectId:         FIREBASE_CONFIG.projectId,
+      databaseURL:       FIREBASE_CONFIG.databaseURL,
+      storageBucket:     FIREBASE_CONFIG.storageBucket,
+      messagingSenderId: FIREBASE_CONFIG.messagingSenderId,
+    });
+  }
+  return _rnApp;
 };
 
 // ─── Get data from a Firebase path ───────────────────────────────────────────
 export const getData = async (path) => {
-  const app = ensureRNFirebaseDefaultApp();
-  const db = getDatabase(app);
-  const snapshot = await get(ref(db, path));
+  const { getDatabase } = require('@react-native-firebase/database');
+  const snapshot = await getDatabase(ensureApp()).ref(path).once('value');
   return snapshot.exists() ? snapshot.val() : null;
 };
 
 // ─── Save (overwrite) data at a Firebase path ────────────────────────────────
 export const saveData = async (path, data) => {
-  const app = ensureRNFirebaseDefaultApp();
-  const db = getDatabase(app);
-  await set(ref(db, path), data);
+  const { getDatabase } = require('@react-native-firebase/database');
+  await getDatabase(ensureApp()).ref(path).set(data);
 };
 
 // ─── Update (merge) data at a Firebase path ──────────────────────────────────
 export const updateData = async (path, data) => {
-  const app = ensureRNFirebaseDefaultApp();
-  const db = getDatabase(app);
-  await update(ref(db, path), data);
+  const { getDatabase } = require('@react-native-firebase/database');
+  await getDatabase(ensureApp()).ref(path).update(data);
 };
 
 // ─── Upload file to Firebase Storage ─────────────────────────────────────────
@@ -51,19 +48,18 @@ export const uploadFileToStorage = async (storagePath, localFilePath) => {
       return { success: false, error: 'Missing storagePath/localFilePath' };
     }
 
-    const rnApp = ensureRNFirebaseDefaultApp();
+    const { getStorage } = require('@react-native-firebase/storage');
     const rawPath = String(localFilePath);
     const normalizedPath = rawPath.startsWith('file://') ? rawPath.slice(7) : rawPath;
 
-    const storage = getRNStorage(rnApp);
-    const fileRef = getRNStorageRef(storage, storagePath);
+    const fileRef = getStorage(ensureApp()).ref(storagePath);
     try {
-      await putRNFile(fileRef, normalizedPath, { contentType: 'image/jpeg' });
+      await fileRef.putFile(normalizedPath, { contentType: 'image/jpeg' });
     } catch {
-      await putRNFile(fileRef, rawPath, { contentType: 'image/jpeg' });
+      await fileRef.putFile(rawPath, { contentType: 'image/jpeg' });
     }
 
-    const directUrl = await getRNDownloadURL(fileRef);
+    const directUrl = await fileRef.getDownloadURL();
     return { success: true, data: directUrl };
   } catch (error) {
     return { success: false, error: error?.message || String(error) };

@@ -7,11 +7,6 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { AlertProvider } from './src/Components/AlertToast/AlertToast';
 import { CommonAlertProvider } from './src/Components/CommonAlert/CommonAlert';
 import { LoaderProvider } from './src/Components/LoaderContext';
-import { initFirebase } from './src/Firebase/firebaseConfig';
-
-// Initialize Firebase once at app start
-initFirebase();
-
 // Screens
 import SplashScreen      from './src/Screens/SplashScreen';
 import LoginScreen       from './src/Screens/LoginScreen';
