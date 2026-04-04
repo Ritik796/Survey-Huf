@@ -26,6 +26,7 @@ import { useLoader } from '../Components/LoaderContext';
 import { useAlert } from '../Components/AlertToast/AlertToast';
 import { useCommonAlert } from '../Components/CommonAlert/CommonAlert';
 import { loadLineHousesAction, loadWardLinesAction } from '../Actions/Map/MapAction';
+import { updateHouseInSessionCache } from '../Services/Map/mapServices';
 import { logoutSurveyor } from '../Actions/StartSurvey/StartSurveyAction';
 import { flushPendingSurveyImageUploads, saveSurveyDetails } from '../Services/Map/SurveySaveService';
 import { getUserDetails } from '../utils/storage';
@@ -124,20 +125,12 @@ const getLineEndBearing = (points = []) => {
 
 // ── Custom Map Marker ──────────────────────────────────────────────────────────
 const HouseMarker = ({ house, isSelected, isDone, onPress }) => {
-  const [tracksViewChanges, setTracksViewChanges] = useState(true);
-
-  useEffect(() => {
-    setTracksViewChanges(true);
-    const t = setTimeout(() => setTracksViewChanges(false), 300);
-    return () => clearTimeout(t);
-  }, [isSelected]);
-
   return (
     <Marker
       coordinate={{ latitude: Number(house.latitude), longitude: Number(house.longitude) }}
       onPress={() => onPress(house)}
       anchor={{ x: 0.5, y: 0.5 }}
-      tracksViewChanges={tracksViewChanges}
+      tracksViewChanges
     >
       <Image
         source={isDone ? HOUSE_MARKER_DONE_ICON : HOUSE_MARKER_ICON}
@@ -146,7 +139,7 @@ const HouseMarker = ({ house, isSelected, isDone, onPress }) => {
           isSelected && markerStyles.houseMarkerIconSelected,
         ]}
         resizeMode="contain"
-        onLoad={() => setTracksViewChanges(false)}
+        fadeDuration={0}
       />
     </Marker>
   );
@@ -184,7 +177,7 @@ const MapScreen = ({ navigation }) => {
   const { showAlert } = useAlert();
   const { showCommonAlert } = useCommonAlert();
   const housesByLineRef = useRef({});
-  const currentLineId = wardLines[activeLineIndex]?.id || null;
+  const currentLineId = wardLines[activeLineIndex]?.id ?? null;
 
   const mapRef = useRef(null);
   const locationWatchIdRef = useRef(null);
@@ -275,8 +268,8 @@ const MapScreen = ({ navigation }) => {
       return;
     }
 
-    const cardLat = Number(house?.latitude);
-    const cardLng = Number(house?.longitude);
+    // const cardLat = Number(house?.latitude);
+    // const cardLng = Number(house?.longitude);
     let userLat = Number(currentUserLocation?.latitude);
     let userLng = Number(currentUserLocation?.longitude);
     let locationLoaderShown = false;
@@ -312,21 +305,23 @@ const MapScreen = ({ navigation }) => {
       }
     }
 
-    if (
-      Number.isFinite(cardLat) && Number.isFinite(cardLng) &&
-      Number.isFinite(userLat) && Number.isFinite(userLng)
-    ) {
-      const dist = Math.round(getDistanceMeters(userLat, userLng, cardLat, cardLng));
-      if (dist > REQUIRED_SURVEY_DISTANCE) {
-        showAlert(
-          'error',
-          msg.distance.outOfRange
-            .replace('{{currentDistance}}', formatDistanceForDisplay(dist))
-            .replace('{{requiredDistance}}', formatDistanceForDisplay(REQUIRED_SURVEY_DISTANCE))
-        );
-        return;
-      }
-    }
+    // NOTE: Temporarily disabled for functional testing.
+    // Keep this range check block for re-enable after testing.
+    // if (
+    //   Number.isFinite(cardLat) && Number.isFinite(cardLng) &&
+    //   Number.isFinite(userLat) && Number.isFinite(userLng)
+    // ) {
+    //   const dist = Math.round(getDistanceMeters(userLat, userLng, cardLat, cardLng));
+    //   if (dist > REQUIRED_SURVEY_DISTANCE) {
+    //     showAlert(
+    //       'error',
+    //       msg.distance.outOfRange
+    //         .replace('{{currentDistance}}', formatDistanceForDisplay(dist))
+    //         .replace('{{requiredDistance}}', formatDistanceForDisplay(REQUIRED_SURVEY_DISTANCE))
+    //     );
+    //     return;
+    //   }
+    // }
     setSelectedCard(house);
     setCardModalVisible(true);
   }, [currentUserLocation, hideLoader, showAlert, showLoader, updateUserLocation]);
@@ -485,6 +480,7 @@ const MapScreen = ({ navigation }) => {
       )));
       if (currentLineId) {
         const lineId = String(currentLineId);
+        // Update in-component cache (filtered houses)
         const existing = housesByLineRef.current[lineId];
         if (Array.isArray(existing)) {
           housesByLineRef.current[lineId] = existing.map((house) => (
@@ -493,6 +489,8 @@ const MapScreen = ({ navigation }) => {
               : house
           ));
         }
+        // Update module-level session cache (raw houses) so remount gets fresh data
+        updateHouseInSessionCache(assignedWard, lineId, cardId, { hufRfidNumber: scanCardNumber });
       }
       showAlert('success', msg.survey.saveSuccess);
       setCardModalVisible(false);
@@ -728,8 +726,13 @@ const MapScreen = ({ navigation }) => {
         if (resp.ok && Array.isArray(resp.wardLines)) {
           setWardLines(resp.wardLines);
           setLineCardRangesByLineId(resp.lineCardRanges || {});
-          setActiveLineIndex(resp.initialLineIndex || 0);
-          if (resp.wardLines[0]?.points?.length) {
+          const initialIndex = Number.isFinite(Number(resp.initialLineIndex))
+            ? Number(resp.initialLineIndex)
+            : 0;
+          setActiveLineIndex(initialIndex);
+          if (resp.wardLines[initialIndex]?.points?.length) {
+            mapRef.current?.animateToRegion(getRegionFromPoints(resp.wardLines[initialIndex].points), 450);
+          } else if (resp.wardLines[0]?.points?.length) {
             mapRef.current?.animateToRegion(getRegionFromPoints(resp.wardLines[0].points), 450);
           }
         } else {
@@ -766,7 +769,8 @@ const MapScreen = ({ navigation }) => {
     let isMounted = true;
 
     const hydrateLineHouses = async () => {
-      if (!assignedWard || !currentLineId) {
+      const hasLineId = currentLineId !== null && currentLineId !== undefined && String(currentLineId).trim() !== '';
+      if (!assignedWard || !hasLineId) {
         setLineHouses([]);
         return;
       }
@@ -967,7 +971,6 @@ const MapScreen = ({ navigation }) => {
                 <Marker
                   coordinate={currentLine.points[0]}
                   anchor={{ x: 0.5, y: 0.5 }}
-                  tracksViewChanges={false}
                 >
                   <View style={[styles.lineStartDot, styles.lineStartDotActive]} />
                 </Marker>
@@ -976,7 +979,6 @@ const MapScreen = ({ navigation }) => {
                 <Marker
                   coordinate={currentLine.points[currentLine.points.length - 1]}
                   anchor={{ x: 0.5, y: 0.5 }}
-                  tracksViewChanges={false}
                 >
                   <View
                     style={[
@@ -1005,11 +1007,13 @@ const MapScreen = ({ navigation }) => {
             <Marker.Animated
               coordinate={userAnimatedCoordinate}
               anchor={{ x: 0.5, y: 0.5 }}
+              tracksViewChanges
             >
               <Image
                 source={USER_MARKER_ICON}
                 style={styles.userMarkerIcon}
                 resizeMode="contain"
+                fadeDuration={0}
               />
             </Marker.Animated>
           ) : null}
@@ -1562,5 +1566,3 @@ const styles = StyleSheet.create({
 });
 
 export default MapScreen;
-
-
