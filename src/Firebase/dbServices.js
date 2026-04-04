@@ -1,12 +1,12 @@
-import database from '@react-native-firebase/database';
 import { getApp as getRNApp, getApps as getRNApps, initializeApp as initializeRNApp } from '@react-native-firebase/app';
+import { getDatabase, ref, get, set, update } from '@react-native-firebase/database';
 import {
   getStorage as getRNStorage,
   ref as getRNStorageRef,
   putFile as putRNFile,
   getDownloadURL as getRNDownloadURL,
 } from '@react-native-firebase/storage';
-import { FIREBASE_CONFIG, CITY } from './firebaseConfig';
+import { FIREBASE_CONFIG } from './firebaseConfig';
 
 // ─── Ensure native Firebase app is initialized ────────────────────────────────
 const ensureRNFirebaseDefaultApp = () => {
@@ -24,21 +24,24 @@ const ensureRNFirebaseDefaultApp = () => {
 
 // ─── Get data from a Firebase path ───────────────────────────────────────────
 export const getData = async (path) => {
-  ensureRNFirebaseDefaultApp();
-  const snapshot = await database().ref(path).once('value');
+  const app = ensureRNFirebaseDefaultApp();
+  const db = getDatabase(app);
+  const snapshot = await get(ref(db, path));
   return snapshot.exists() ? snapshot.val() : null;
 };
 
 // ─── Save (overwrite) data at a Firebase path ────────────────────────────────
 export const saveData = async (path, data) => {
-  ensureRNFirebaseDefaultApp();
-  await database().ref(path).set(data);
+  const app = ensureRNFirebaseDefaultApp();
+  const db = getDatabase(app);
+  await set(ref(db, path), data);
 };
 
 // ─── Update (merge) data at a Firebase path ──────────────────────────────────
 export const updateData = async (path, data) => {
-  ensureRNFirebaseDefaultApp();
-  await database().ref(path).update(data);
+  const app = ensureRNFirebaseDefaultApp();
+  const db = getDatabase(app);
+  await update(ref(db, path), data);
 };
 
 // ─── Upload file to Firebase Storage ─────────────────────────────────────────
