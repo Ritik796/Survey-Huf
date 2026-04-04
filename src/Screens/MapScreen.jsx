@@ -667,6 +667,29 @@ const MapScreen = ({ navigation }) => {
     }
   }, [userAnimatedCoordinate]);
 
+  const pauseTracking = useCallback(() => {
+    if (locationWatchIdRef.current !== null) {
+      Geolocation.clearWatch(locationWatchIdRef.current);
+      locationWatchIdRef.current = null;
+    }
+  }, []);
+
+  const resumeTracking = useCallback(() => {
+    if (locationWatchIdRef.current !== null) return;
+    locationWatchIdRef.current = Geolocation.watchPosition(
+      (position) => {
+        const latitude = Number(position?.coords?.latitude);
+        const longitude = Number(position?.coords?.longitude);
+        if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return;
+        updateUserLocation(latitude, longitude, false);
+      },
+      (error) => {
+        MAP_SAVE_LOG('location_watch_error', error?.message || error);
+      },
+      locationSettings.watchPosition
+    );
+  }, [updateUserLocation]);
+
   const handleGetCurrentLocation = useCallback(() => {
     if (locating) return;
     setLocating(true);
@@ -688,7 +711,7 @@ const MapScreen = ({ navigation }) => {
       },
       () => {
         setLocating(false);
-        showAlert('error', 'कृपया GPS / Location चालू करें।');
+        showAlert('error', msg.location.gpsTurnOn);
       },
       locationSettings.getCurrentPosition
     );
@@ -1155,6 +1178,8 @@ const MapScreen = ({ navigation }) => {
         onCardImageCaptured={handleCardImageCaptured}
         onHouseImageCaptured={handleHouseImageCaptured}
         onVerifyAndSave={handleVerifyAndSave}
+        onTrackingPause={pauseTracking}
+        onTrackingResume={resumeTracking}
       />
     </View>
   );

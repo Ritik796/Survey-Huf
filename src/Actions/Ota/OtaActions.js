@@ -8,14 +8,14 @@ export const createOtaUpdateHandlers = ({ setOtaModal, pendingUpdateActionRef })
     const description =
       meta?.description
       || (updateType === 'native'
-        ? 'Naya app version available hai. Admin se naya APK install karwayein.'
-        : 'Naya update available hai. Better performance ke liye abhi update karein.');
+        ? 'A new app version is available. Please contact admin to install the new APK.'
+        : 'A new update is available. Update now for better performance.');
 
     pendingUpdateActionRef.current = typeof startUpdateFn === 'function' ? startUpdateFn : null;
     setOtaModal({
       visible: true,
-      title: meta?.modalTitle || 'Naya Update Available',
-      actionLabel: meta?.actionLabel || 'Abhi Update Karein',
+      title: meta?.modalTitle || 'New Update Available',
+      actionLabel: meta?.actionLabel || 'Update Now',
       updateType,
       progress: 0,
       status: status || 'Update available...',
@@ -25,9 +25,9 @@ export const createOtaUpdateHandlers = ({ setOtaModal, pendingUpdateActionRef })
       canStartUpdate: !!startUpdateFn,
       showUnavailableMessage: !Boolean(startUpdateFn) && !hideActions,
       unavailableMessage: isMandatoryBlock
-        ? 'Naya app version available hai. Admin se naya APK install karwayein.'
+        ? 'A new app version is available. Please contact admin to install the new APK.'
         : !startUpdateFn
-          ? (status || 'Automatic update available nahi hai. Naya app build install karein.')
+          ? (status || 'Automatic update not available. Please install the new app build.')
           : '',
       isMandatoryBlock,
       blockApp: isMandatoryBlock,
@@ -43,7 +43,7 @@ export const createOtaUpdateHandlers = ({ setOtaModal, pendingUpdateActionRef })
       ...prev,
       progress: safeProgress,
       isDownloading: true,
-      status: 'Download ho raha hai...',
+      status: 'Downloading...',
       showUnavailableMessage: false,
       unavailableMessage: '',
     }));
@@ -54,7 +54,7 @@ export const createOtaUpdateHandlers = ({ setOtaModal, pendingUpdateActionRef })
       isDownloading: true,
       canStartUpdate: false,
       progress: 100,
-      status: type === 'native' ? 'Installer khul raha hai...' : 'Update install ho raha hai...',
+      status: type === 'native' ? 'Opening installer...' : 'Installing update...',
       showUnavailableMessage: false,
       unavailableMessage: '',
     }));

@@ -31,7 +31,7 @@ const UpdateModal = ({
           <Text style={styles.iconTxt}>UP</Text>
         </View>
 
-        <Text style={styles.title}>{title || 'Naya update available hai'}</Text>
+        <Text style={styles.title}>{title || 'New update available'}</Text>
 
         {!!version && (
           <View style={styles.versionBadge}>
@@ -40,7 +40,7 @@ const UpdateModal = ({
         )}
 
         <Text style={styles.desc}>
-          {description || `Naya version (v${version}) available hai. Better performance ke liye update karein.`}
+          {description || `A new version (v${version}) is available. Update now for better performance.`}
         </Text>
 
         <View style={styles.divider} />
@@ -48,28 +48,28 @@ const UpdateModal = ({
         {isDownloading ? (
           <View style={styles.progressWrap}>
             <View style={styles.progressHeader}>
-              <Text style={styles.progressLabel}>{status || 'Download ho raha hai...'}</Text>
+              <Text style={styles.progressLabel}>{status || 'Downloading...'}</Text>
               <Text style={styles.progressPct}>{progress}%</Text>
             </View>
             <View style={styles.progressTrack}>
               <View style={[styles.progressFill, { width: `${progress}%` }]} />
             </View>
-            <Text style={styles.warningTxt}>Update ke dauran app band na karein.</Text>
+            <Text style={styles.warningTxt}>Do not close the app during the update.</Text>
           </View>
         ) : !hideActions && canStartUpdate ? (
           <TouchableOpacity style={styles.updateBtn} onPress={onUpdatePress} activeOpacity={0.85}>
-            <Text style={styles.updateBtnTxt}>{actionLabel || 'Abhi update karein'}</Text>
+            <Text style={styles.updateBtnTxt}>{actionLabel || 'Update Now'}</Text>
           </TouchableOpacity>
         ) : showUnavailableMessage ? (
           <View style={styles.unavailWrap}>
             <Text style={styles.unavailTxt}>
-              {unavailableMessage || 'Automatic update available nahi hai. Naya app build install karein.'}
+              {unavailableMessage || 'Automatic update not available. Please install the new app build.'}
             </Text>
           </View>
         ) : null}
 
         {!isDownloading && !hideFooterNote ? (
-          <Text style={styles.footerNote}>Yeh update continue karne ke liye required hai.</Text>
+          <Text style={styles.footerNote}>This update is required to continue.</Text>
         ) : null}
       </View>
     </View>

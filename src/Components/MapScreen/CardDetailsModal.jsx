@@ -80,6 +80,8 @@ const CardDetailsModal = ({
   onCardImageCaptured,
   onHouseImageCaptured,
   onVerifyAndSave,
+  onTrackingPause,
+  onTrackingResume,
 }) => {
   // view: 'form' | 'qr' | 'camera' | 'preview'
   const [view, setView] = useState('form');
@@ -108,6 +110,15 @@ const CardDetailsModal = ({
     loop.start();
     return () => loop.stop();
   }, [view, scanLineAnim]);
+
+  // Pause GPS tracking when camera is active, resume when not
+  useEffect(() => {
+    if (view === 'camera') {
+      onTrackingPause?.();
+    } else {
+      onTrackingResume?.();
+    }
+  }, [view, onTrackingPause, onTrackingResume]);
 
   const hasQr = Boolean(cardData?.qrData);
   const hasCardImage = Boolean(cardData?.cardImageUri);
