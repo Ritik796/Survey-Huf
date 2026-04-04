@@ -1,5 +1,4 @@
 // ─── Production Config — Hisar (commented for now) ───────────────────────────
-/*
 const HISAR_CONFIG = {
   apiKey:            'AIzaSyBGZ_IB4y5Ov1nuqIhWndGU8hfJadlE85I',
   authDomain:        'dtdnavigator.firebaseapp.com',
@@ -28,7 +27,6 @@ export const HISAR_CITY = {
   databaseName:        'dtdhisar',
   isUCCApplied:        'no',
 };
-*/
 
 // ─── Test Config — DevTest ────────────────────────────────────────────────────
 const DEVTEST_CONFIG = {
@@ -61,17 +59,17 @@ export const DEVTEST_CITY = {
 };
 
 // ─── Manual Active Config Selection ───────────────────────────────────────────
-// firebase config 1 -> DevTest
-const FIREBASE_CONFIG_1 = DEVTEST_CONFIG;
-const CITY_CONFIG_1 = DEVTEST_CITY;
+// firebase config 1 -> DevTest (commented for production)
+// const FIREBASE_CONFIG_1 = DEVTEST_CONFIG;
+// const CITY_CONFIG_1 = DEVTEST_CITY;
 
-// firebase config 2 -> Hisar (commented for now)
-// const FIREBASE_CONFIG_2 = HISAR_CONFIG;
-// const CITY_CONFIG_2 = HISAR_CITY;
+// firebase config 2 -> Hisar
+const FIREBASE_CONFIG_2 = HISAR_CONFIG;
+const CITY_CONFIG_2 = HISAR_CITY;
 
 // Keep only one ACTIVE config id uncommented at a time.
-const ACTIVE_CONFIG = FIREBASE_CONFIG_1;
-const ACTIVE_CITY = CITY_CONFIG_1;
+const ACTIVE_CONFIG = FIREBASE_CONFIG_2;
+const ACTIVE_CITY = CITY_CONFIG_2;
 
 export const CITY = ACTIVE_CITY;
 export const FIREBASE_CONFIG = ACTIVE_CONFIG;
