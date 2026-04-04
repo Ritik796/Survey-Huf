@@ -258,7 +258,8 @@ const filterHousesByCardRanges = (houses = [], ranges = []) => {
 };
 
 export const loadLineHousesAction = async ({ ward, lineId, lineCardRanges = [] }) => {
-  if (!ward || !lineId) {
+  const hasLineId = lineId !== null && lineId !== undefined && String(lineId).trim() !== '';
+  if (!ward || !hasLineId) {
     return {
       ok: true,
       houses: [],
@@ -286,6 +287,7 @@ export const loadLineHousesAction = async ({ ward, lineId, lineCardRanges = [] }
     houses: filteredHouses,
   };
 };
+
 
 
 

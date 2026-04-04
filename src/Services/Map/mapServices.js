@@ -2,6 +2,11 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { CITY } from '../../Firebase/firebaseConfig';
 import { getData } from '../../Firebase/dbServices';
 
+// ── Session-level in-memory house cache ───────────────────────────────────────
+// Survives navigation (component mount/unmount) but resets when app is killed.
+const _housesSessionCache = {};
+const _houseSessionKey = (ward, line) => `${ward}_${line}`;
+
 const isValidPoint = (point) => (
   Array.isArray(point)
   && point.length >= 2
@@ -89,27 +94,6 @@ const getCachedWardLines = async (zone) => {
     cachedDate: cachedDateRaw || null,
     cachedLines: Array.isArray(cachedLines) ? cachedLines : [],
   };
-};
-
-const getCachedHouseCards = async (ward, line) => {
-  const cacheKey = `house_cards_${ward}_${line}`;
-  const cachedRaw = await AsyncStorage.getItem(cacheKey);
-
-  let cachedData = [];
-  try {
-    cachedData = cachedRaw ? JSON.parse(cachedRaw) : [];
-  } catch (err) {
-    cachedData = [];
-  }
-
-  return {
-    cacheKey,
-    cachedData: Array.isArray(cachedData) ? cachedData : [],
-  };
-};
-
-const saveHouseCardsCache = async (cacheKey, data) => {
-  await AsyncStorage.setItem(cacheKey, JSON.stringify(data));
 };
 
 const saveWardLinesCache = async ({ cacheKey, dateKey, latestDate, lines }) => {
@@ -215,6 +199,14 @@ export const getWardLineJson = async (zone) => {
   }
 };
 
+export const updateHouseInSessionCache = (ward, line, cardId, updatedFields) => {
+  const key = _houseSessionKey(ward, line);
+  if (!_housesSessionCache[key]) return;
+  _housesSessionCache[key] = _housesSessionCache[key].map((house) =>
+    String(house.id) === String(cardId) ? { ...house, ...updatedFields } : house
+  );
+};
+
 export const getHouseCardsByWardLine = async ({ ward, line }) => {
   if (!ward || line === null || line === undefined || line === '') {
     return {
@@ -224,21 +216,22 @@ export const getHouseCardsByWardLine = async ({ ward, line }) => {
     };
   }
 
-  const { cacheKey, cachedData } = await getCachedHouseCards(ward, line);
+  // Return from session cache immediately if available
+  const sessionKey = _houseSessionKey(ward, line);
+  if (_housesSessionCache[sessionKey]) {
+    return {
+      ok: true,
+      message: 'Success (Session Cache)',
+      data: _housesSessionCache[sessionKey],
+      fromCache: true,
+    };
+  }
 
   try {
     const housesPath = `Houses/${ward}/${line}`;
     const housesPayload = await getData(housesPath);
 
     if (!housesPayload || typeof housesPayload !== 'object') {
-      if (cachedData.length > 0) {
-        return {
-          ok: true,
-          message: 'Success (Cached)',
-          data: cachedData,
-          fromCache: true,
-        };
-      }
       return {
         ok: true,
         message: 'No houses found',
@@ -260,7 +253,7 @@ export const getHouseCardsByWardLine = async ({ ward, line }) => {
         hufRfidNumber: value.hufRfidNumber || '',
       }));
 
-    await saveHouseCardsCache(cacheKey, cards);
+    _housesSessionCache[sessionKey] = cards;
 
     return {
       ok: true,
@@ -269,15 +262,6 @@ export const getHouseCardsByWardLine = async ({ ward, line }) => {
       fromCache: false,
     };
   } catch (error) {
-    if (cachedData.length > 0) {
-      return {
-        ok: true,
-        message: 'Network failed, using cached houses',
-        data: cachedData,
-        fromCache: true,
-      };
-    }
-
     return {
       ok: false,
       message: 'Unable to load house cards',
