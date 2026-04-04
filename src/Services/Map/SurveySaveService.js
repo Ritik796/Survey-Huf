@@ -2,7 +2,7 @@ import RNFS from 'react-native-fs';
 import ImageResizer from 'react-native-image-resizer';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { CITY } from '../../Firebase/firebaseConfig';
-import { getData, saveData, updateData, uploadFileToStorage } from '../../Firebase/dbServices';
+import { saveData, updateData, uploadFileToStorage } from '../../Firebase/dbServices';
 
 const MAX_IMAGE_SIZE_BYTES = 50 * 1024; // 50KB
 const DEFAULT_LAT_LNG = '0,0';
@@ -308,28 +308,28 @@ export const saveSurveyDetails = async ({
     const safeCardNumber = sanitizePathPart(cardNumber);
     const dbPath = `HUFCardData/${safeWard}/${safeLine}/${safeCardNumber}/${qrKey}`;
     const houseCardPath = `Houses/${safeWard}/${safeLine}/${safeCardNumber}`;
-    const houseLinePath = `Houses/${safeWard}/${safeLine}`;
+    // const houseLinePath = `Houses/${safeWard}/${safeLine}`;
+    // const lineCards = await getData(houseLinePath);
 
-    const lineCards = await getData(houseLinePath);
-
-    if (lineCards && typeof lineCards === 'object') {
-      const sameRfidOnAnotherCard = Object.entries(lineCards).find(([lineCardNo, lineCardData]) => (
-        String(lineCardNo) !== String(safeCardNumber)
-        && String(lineCardData?.hufRfidNumber || '').trim() === String(scanCardNumber)
-      ));
-
-      if (sameRfidOnAnotherCard) {
-        SURVEY_SAVE_LOG('saveSurveyDetails:rfid_used_on_other_card', {
-          scanCardNumber,
-          otherCardNumber: sameRfidOnAnotherCard[0],
-        });
-        return {
-          ok: false,
-          code: 'RFID_ALREADY_USED',
-          message: `This scan card is already used on card ${sameRfidOnAnotherCard[0]}`,
-        };
-      }
-    }
+    // NOTE: Temporarily disabled — re-enable after testing
+    // if (lineCards && typeof lineCards === 'object') {
+    //   const sameRfidOnAnotherCard = Object.entries(lineCards).find(([lineCardNo, lineCardData]) => (
+    //     String(lineCardNo) !== String(safeCardNumber)
+    //     && String(lineCardData?.hufRfidNumber || '').trim() === String(scanCardNumber)
+    //   ));
+    //
+    //   if (sameRfidOnAnotherCard) {
+    //     SURVEY_SAVE_LOG('saveSurveyDetails:rfid_used_on_other_card', {
+    //       scanCardNumber,
+    //       otherCardNumber: sameRfidOnAnotherCard[0],
+    //     });
+    //     return {
+    //       ok: false,
+    //       code: 'RFID_ALREADY_USED',
+    //       message: `This scan card is already used on card ${sameRfidOnAnotherCard[0]}`,
+    //     };
+    //   }
+    // }
 
     const payload = {
       imgName: `${sanitizePathPart(scanCardNumber)}.jpg`,
