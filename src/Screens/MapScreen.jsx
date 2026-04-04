@@ -961,10 +961,13 @@ const MapScreen = ({ navigation }) => {
                   text: 'Logout',
                   style: 'destructive',
                   icon: 'logout',
-                  onPress: () => logoutSurveyor(
-                    (screen) => navigation.navigate(screen),
-                    showAlert,
-                  ),
+                  onPress: () => {
+                    pauseTracking();
+                    logoutSurveyor(
+                      (screen) => navigation.navigate(screen),
+                      showAlert,
+                    );
+                  },
                 },
               ],
             });
