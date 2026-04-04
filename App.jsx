@@ -12,7 +12,6 @@ import { OtaProvider } from './src/Components/OtaContext';
 import SplashScreen      from './src/Screens/SplashScreen';
 import LoginScreen       from './src/Screens/LoginScreen';
 import StartSurveyScreen from './src/Screens/StartSurveyScreen';
-import HomeScreen        from './src/Screens/HomeScreen';
 import MapScreen         from './src/Screens/MapScreen';
 
 const Stack = createNativeStackNavigator();
@@ -40,7 +39,6 @@ function App() {
                   <Stack.Screen name="Login"        component={LoginScreen} />
                   <Stack.Screen name="StartSurvey"  component={StartSurveyScreen} />
                   <Stack.Screen name="MapScreen"    component={MapScreen} />
-                  <Stack.Screen name="Home"         component={HomeScreen} />
                 </Stack.Navigator>
               </NavigationContainer>
             </OtaProvider>

@@ -158,6 +158,12 @@ const CardDetailsModal = ({
     init();
   }, [visible, card?.hufRfidNumber]);
 
+  useEffect(() => {
+    if (view === 'qr') {
+      hasScannedRef.current = false;
+    }
+  }, [view]);
+
   // ── QR Code Scanner ──
   const codeScanner = useCodeScanner({
     codeTypes: ['qr'],

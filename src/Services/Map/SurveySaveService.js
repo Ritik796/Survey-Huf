@@ -283,6 +283,12 @@ export const validateScanCardMapping = async ({
   ward,
   lineNumber,
 }) => {
+  SURVEY_SAVE_LOG('validateScanCardMapping:start', {
+    scanCardNumber: String(scanCardNumber || '').trim(),
+    ward: String(ward || '').trim(),
+    lineNumber: String(lineNumber || '').trim(),
+  });
+
   if (!scanCardNumber || !ward || !lineNumber) {
     return {
       ok: false,
@@ -295,27 +301,36 @@ export const validateScanCardMapping = async ({
     const safeLine = sanitizePathPart(lineNumber);
     const mappingPath = resolveCardMappingPath(scanCardNumber);
     const existingMapping = await getData(mappingPath);
+    SURVEY_SAVE_LOG('validateScanCardMapping:fetched_mapping', {
+      mappingPath,
+      existingMapping,
+      safeWard,
+      safeLine,
+    });
 
     if (existingMapping && typeof existingMapping === 'object') {
-      const mappedWard = String(existingMapping?.ward || '').trim();
-      const mappedLine = String(existingMapping?.line || existingMapping?.lineNumber || '').trim();
+      const mappedWard = String(existingMapping?.ward || '').trim() || safeWard;
+      const mappedLine = String(existingMapping?.line || existingMapping?.lineNumber || '').trim() || safeLine;
+      SURVEY_SAVE_LOG('validateScanCardMapping:duplicate_found', {
+        mappingPath,
+        mappedWard,
+        mappedLine,
+      });
 
-      if (
-        mappedWard
-        && mappedLine
-        && (mappedWard !== safeWard || mappedLine !== safeLine)
-      ) {
-        return {
-          ok: false,
-          code: 'CARD_MAPPED_TO_OTHER_LINE_OR_WARD',
-          message: `This card is already mapped to ward ${mappedWard}, line ${mappedLine}`,
-          data: {
-            mappedWard,
-            mappedLine,
-            mappingPath,
-          },
-        };
-      }
+      return {
+        ok: false,
+        code: (
+          mappedWard === safeWard && mappedLine === safeLine
+            ? 'CARD_ALREADY_MAPPED_SAME_LINE_WARD'
+            : 'CARD_MAPPED_TO_OTHER_LINE_OR_WARD'
+        ),
+        message: `This card is already mapped to ward ${mappedWard}, line ${mappedLine}`,
+        data: {
+          mappedWard,
+          mappedLine,
+          mappingPath,
+        },
+      };
     }
 
     return {
@@ -418,9 +433,6 @@ export const saveSurveyDetails = async ({
     await updateData(cardMappingPath, {
       ward: safeWard,
       line: safeLine,
-      cardNumber: safeCardNumber,
-      scanCardNumber: String(scanCardNumber || '').trim(),
-      _at: toDateTimeString(),
     });
     SURVEY_SAVE_LOG('db:save:done', { dbPath });
 
