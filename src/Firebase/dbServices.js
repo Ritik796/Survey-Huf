@@ -1,5 +1,4 @@
-import { ref, get, set, update } from 'firebase/database';
-import { getDB } from './firebaseConfig';
+import database from '@react-native-firebase/database';
 import { getApp as getRNApp, getApps as getRNApps, initializeApp as initializeRNApp } from '@react-native-firebase/app';
 import {
   getStorage as getRNStorage,
@@ -7,41 +6,42 @@ import {
   putFile as putRNFile,
   getDownloadURL as getRNDownloadURL,
 } from '@react-native-firebase/storage';
-import { FIREBASE_CONFIG } from './firebaseConfig';
+import { FIREBASE_CONFIG, CITY } from './firebaseConfig';
+
+// ─── Ensure native Firebase app is initialized ────────────────────────────────
+const ensureRNFirebaseDefaultApp = () => {
+  const existingApps = getRNApps();
+  if (existingApps.length > 0) return getRNApp();
+  return initializeRNApp({
+    apiKey:            FIREBASE_CONFIG.apiKey,
+    appId:             FIREBASE_CONFIG.appId,
+    projectId:         FIREBASE_CONFIG.projectId,
+    databaseURL:       FIREBASE_CONFIG.databaseURL,
+    storageBucket:     FIREBASE_CONFIG.storageBucket,
+    messagingSenderId: FIREBASE_CONFIG.messagingSenderId,
+  });
+};
 
 // ─── Get data from a Firebase path ───────────────────────────────────────────
 export const getData = async (path) => {
-  const db = getDB();
-  const snapshot = await get(ref(db, path));
+  ensureRNFirebaseDefaultApp();
+  const snapshot = await database().ref(path).once('value');
   return snapshot.exists() ? snapshot.val() : null;
 };
 
 // ─── Save (overwrite) data at a Firebase path ────────────────────────────────
 export const saveData = async (path, data) => {
-  const db = getDB();
-  await set(ref(db, path), data);
+  ensureRNFirebaseDefaultApp();
+  await database().ref(path).set(data);
 };
 
 // ─── Update (merge) data at a Firebase path ──────────────────────────────────
 export const updateData = async (path, data) => {
-  const db = getDB();
-  await update(ref(db, path), data);
+  ensureRNFirebaseDefaultApp();
+  await database().ref(path).update(data);
 };
 
-const ensureRNFirebaseDefaultApp = () => {
-  const existingApps = getRNApps();
-  if (existingApps.length > 0) return getRNApp();
-
-  return initializeRNApp({
-    apiKey: FIREBASE_CONFIG.apiKey,
-    appId: FIREBASE_CONFIG.appId,
-    projectId: FIREBASE_CONFIG.projectId,
-    databaseURL: FIREBASE_CONFIG.databaseURL,
-    storageBucket: FIREBASE_CONFIG.storageBucket,
-    messagingSenderId: FIREBASE_CONFIG.messagingSenderId,
-  });
-};
-
+// ─── Upload file to Firebase Storage ─────────────────────────────────────────
 export const uploadFileToStorage = async (storagePath, localFilePath) => {
   try {
     if (!storagePath || !localFilePath) {

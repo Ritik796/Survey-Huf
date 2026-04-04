@@ -1,6 +1,3 @@
-import { initializeApp, getApps, getApp } from 'firebase/app';
-import { getDatabase } from 'firebase/database';
-
 // ─── Production Config — Hisar (commented for now) ───────────────────────────
 /*
 const HISAR_CONFIG = {
@@ -73,25 +70,8 @@ const CITY_CONFIG_1 = DEVTEST_CITY;
 // const CITY_CONFIG_2 = HISAR_CITY;
 
 // Keep only one ACTIVE config id uncommented at a time.
-// const ACTIVE_FIREBASE_CONFIG_ID = 1;
-// const ACTIVE_FIREBASE_CONFIG_ID = 2; // Uncomment only after enabling Hisar block
-
 const ACTIVE_CONFIG = FIREBASE_CONFIG_1;
 const ACTIVE_CITY = CITY_CONFIG_1;
 
 export const CITY = ACTIVE_CITY;
 export const FIREBASE_CONFIG = ACTIVE_CONFIG;
-
-// ─── Initialize Firebase ──────────────────────────────────────────────────────
-let _db = null;
-
-export const initFirebase = () => {
-  const app = getApps().length > 0 ? getApp() : initializeApp(ACTIVE_CONFIG);
-  _db = getDatabase(app);
-  return _db;
-};
-
-export const getDB = () => {
-  if (!_db) return initFirebase();
-  return _db;
-};
