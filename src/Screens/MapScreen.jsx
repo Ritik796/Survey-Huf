@@ -412,24 +412,26 @@ const MapScreen = ({ navigation }) => {
       return;
     }
 
-    const cardLat = Number(selectedCard?.latitude);
-    const cardLng = Number(selectedCard?.longitude);
-    if (Number.isFinite(cardLat) && Number.isFinite(cardLng)) {
-      const userLat = Number(currentUserLocation?.latitude);
-      const userLng = Number(currentUserLocation?.longitude);
-      if (Number.isFinite(userLat) && Number.isFinite(userLng)) {
-        const distanceToCard = Math.round(getDistanceMeters(userLat, userLng, cardLat, cardLng));
-        if (distanceToCard > REQUIRED_SURVEY_DISTANCE) {
-          showAlert(
-            'error',
-            msg.distance.outOfRange
-              .replace('{{currentDistance}}', formatDistanceForDisplay(distanceToCard))
-              .replace('{{requiredDistance}}', formatDistanceForDisplay(REQUIRED_SURVEY_DISTANCE))
-          );
-          return;
-        }
-      }
-    }
+    // NOTE: Temporarily disabled for functional testing.
+    // Keep this save-time range check block for re-enable after testing.
+    // const cardLat = Number(selectedCard?.latitude);
+    // const cardLng = Number(selectedCard?.longitude);
+    // if (Number.isFinite(cardLat) && Number.isFinite(cardLng)) {
+    //   const userLat = Number(currentUserLocation?.latitude);
+    //   const userLng = Number(currentUserLocation?.longitude);
+    //   if (Number.isFinite(userLat) && Number.isFinite(userLng)) {
+    //     const distanceToCard = Math.round(getDistanceMeters(userLat, userLng, cardLat, cardLng));
+    //     if (distanceToCard > REQUIRED_SURVEY_DISTANCE) {
+    //       showAlert(
+    //         'error',
+    //         msg.distance.outOfRange
+    //           .replace('{{currentDistance}}', formatDistanceForDisplay(distanceToCard))
+    //           .replace('{{requiredDistance}}', formatDistanceForDisplay(REQUIRED_SURVEY_DISTANCE))
+    //       );
+    //       return;
+    //     }
+    //   }
+    // }
 
     setCardWorkflowState((prev) => ({
       ...prev,
