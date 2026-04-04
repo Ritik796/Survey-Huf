@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, Dimensions, Image, Animated, Easing } from 'react-native';
 import { theme } from '../theme/appTheme';
 import { getUserDetails } from '../utils/storage';
+import { loadHUFSurveySettings } from '../Services/Settings/HUFSurveySettingsService';
 
 const { width } = Dimensions.get('window');
 
@@ -16,6 +17,7 @@ const SplashScreen = ({ navigation }) => {
 
     const navigateBySession = useCallback(async () => {
         if (hasNavigatedRef.current) return;
+        await loadHUFSurveySettings({ forceRefresh: true });
         const user = await getUserDetails();
         const hasActiveSession = Boolean(user?.userId);
         hasNavigatedRef.current = true;
@@ -164,4 +166,3 @@ const styles = StyleSheet.create({
     },
 });
 export default SplashScreen;
-
