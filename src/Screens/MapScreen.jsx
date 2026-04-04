@@ -28,7 +28,11 @@ import { useCommonAlert } from '../Components/CommonAlert/CommonAlert';
 import { loadLineHousesAction, loadWardLinesAction } from '../Actions/Map/MapAction';
 import { updateHouseInSessionCache } from '../Services/Map/mapServices';
 import { logoutSurveyor } from '../Actions/StartSurvey/StartSurveyAction';
-import { flushPendingSurveyImageUploads, saveSurveyDetails } from '../Services/Map/SurveySaveService';
+import {
+  flushPendingSurveyImageUploads,
+  saveSurveyDetails,
+  validateScanCardMapping,
+} from '../Services/Map/SurveySaveService';
 import { getUserDetails } from '../utils/storage';
 import SurveySettings from '../constants/SurveySettings.json';
 
@@ -251,6 +255,16 @@ const MapScreen = ({ navigation }) => {
     return { done, inProgress, total: lineHouses.length };
   }, [getHouseStatus, lineHouses]);
 
+  const showSurveyPopup = useCallback((title, message, iconType = 'warning', icon = 'warning-amber') => {
+    showCommonAlert({
+      title,
+      message,
+      icon,
+      iconType,
+      buttons: [{ text: 'OK', style: 'cancel' }],
+    });
+  }, [showCommonAlert]);
+
   // ── Actions ──
   const openCardModal = useCallback(async (house) => {
     const isAlreadySurveyed = Boolean(String(house?.hufRfidNumber || '').trim());
@@ -268,8 +282,8 @@ const MapScreen = ({ navigation }) => {
       return;
     }
 
-    // const cardLat = Number(house?.latitude);
-    // const cardLng = Number(house?.longitude);
+    const cardLat = Number(house?.latitude);
+    const cardLng = Number(house?.longitude);
     let userLat = Number(currentUserLocation?.latitude);
     let userLng = Number(currentUserLocation?.longitude);
     let locationLoaderShown = false;
@@ -285,18 +299,18 @@ const MapScreen = ({ navigation }) => {
         const longitude = Number(position?.coords?.longitude);
         const accuracy = Number(position?.coords?.accuracy);
         if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
-          showAlert('error', msg.location.gpsTurnOn);
+          showSurveyPopup('Location Error', msg.location.gpsTurnOn, 'destructive', 'location-off');
           return;
         }
         if (Number.isFinite(accuracy) && accuracy > surveySettings.maxAcceptableAccuracyMeters) {
-          showAlert('error', msg.location.accuracyLow);
+          showSurveyPopup('Low Accuracy', msg.location.accuracyLow, 'warning', 'my-location');
           return;
         }
         updateUserLocation(latitude, longitude, false);
         userLat = latitude;
         userLng = longitude;
       } catch (_error) {
-        showAlert('error', msg.location.gpsTurnOn);
+        showSurveyPopup('Location Error', msg.location.gpsTurnOn, 'destructive', 'location-off');
         return;
       } finally {
         if (locationLoaderShown) {
@@ -305,36 +319,61 @@ const MapScreen = ({ navigation }) => {
       }
     }
 
-    // NOTE: Temporarily disabled for functional testing.
-    // Keep this range check block for re-enable after testing.
-    // if (
-    //   Number.isFinite(cardLat) && Number.isFinite(cardLng) &&
-    //   Number.isFinite(userLat) && Number.isFinite(userLng)
-    // ) {
-    //   const dist = Math.round(getDistanceMeters(userLat, userLng, cardLat, cardLng));
-    //   if (dist > REQUIRED_SURVEY_DISTANCE) {
-    //     showAlert(
-    //       'error',
-    //       msg.distance.outOfRange
-    //         .replace('{{currentDistance}}', formatDistanceForDisplay(dist))
-    //         .replace('{{requiredDistance}}', formatDistanceForDisplay(REQUIRED_SURVEY_DISTANCE))
-    //     );
-    //     return;
-    //   }
-    // }
+    if (
+      Number.isFinite(cardLat) && Number.isFinite(cardLng) &&
+      Number.isFinite(userLat) && Number.isFinite(userLng)
+    ) {
+      const dist = Math.round(getDistanceMeters(userLat, userLng, cardLat, cardLng));
+      if (dist > REQUIRED_SURVEY_DISTANCE) {
+        showSurveyPopup(
+          'Out of Range',
+          msg.distance.outOfRange
+            .replace('{{currentDistance}}', formatDistanceForDisplay(dist))
+            .replace('{{requiredDistance}}', formatDistanceForDisplay(REQUIRED_SURVEY_DISTANCE)),
+          'warning',
+          'wrong-location'
+        );
+        return;
+      }
+    }
     setSelectedCard(house);
     setCardModalVisible(true);
-  }, [currentUserLocation, hideLoader, showAlert, showLoader, updateUserLocation]);
+  }, [currentUserLocation, hideLoader, showLoader, showSurveyPopup, updateUserLocation]);
 
   const handleQrScanned = useCallback(
-    (scannedCode) => {
+    async (scannedCode) => {
       if (!selectedCard?.id) return;
-      setCardWorkflowState((prev) => ({
-        ...prev,
-        [selectedCard.id]: { ...prev[selectedCard.id], qrData: scannedCode, saved: false },
-      }));
+
+      const cleanCode = String(scannedCode || '').trim();
+      const ward = String(assignedWard || '').trim();
+      const lineNumber = String(currentLineId || '').trim();
+
+      if (!cleanCode) {
+        showAlert('error', 'Invalid QR code');
+        return;
+      }
+
+      try {
+        const mappingValidation = await validateScanCardMapping({
+          scanCardNumber: cleanCode,
+          ward,
+          lineNumber,
+        });
+
+        if (!mappingValidation?.ok) {
+          showAlert('error', mappingValidation?.message || 'Card mapping validation failed');
+          return;
+        }
+
+        setCardWorkflowState((prev) => ({
+          ...prev,
+          [selectedCard.id]: { ...prev[selectedCard.id], qrData: cleanCode, saved: false },
+        }));
+      } catch (error) {
+        showAlert('error', error?.message || 'Unable to validate scanned card');
+      }
     },
-    [selectedCard]
+    [assignedWard, currentLineId, selectedCard, showAlert]
   );
 
   const handleCardImageCaptured = useCallback(
@@ -408,30 +447,30 @@ const MapScreen = ({ navigation }) => {
       return;
     }
     if (!Number.isFinite(saveLatitude) || !Number.isFinite(saveLongitude)) {
-      showAlert('error', msg.location.gpsUnavailable);
+      showSurveyPopup('Location Error', msg.location.gpsUnavailable, 'destructive', 'location-off');
       return;
     }
 
-    // NOTE: Temporarily disabled for functional testing.
-    // Keep this save-time range check block for re-enable after testing.
-    // const cardLat = Number(selectedCard?.latitude);
-    // const cardLng = Number(selectedCard?.longitude);
-    // if (Number.isFinite(cardLat) && Number.isFinite(cardLng)) {
-    //   const userLat = Number(currentUserLocation?.latitude);
-    //   const userLng = Number(currentUserLocation?.longitude);
-    //   if (Number.isFinite(userLat) && Number.isFinite(userLng)) {
-    //     const distanceToCard = Math.round(getDistanceMeters(userLat, userLng, cardLat, cardLng));
-    //     if (distanceToCard > REQUIRED_SURVEY_DISTANCE) {
-    //       showAlert(
-    //         'error',
-    //         msg.distance.outOfRange
-    //           .replace('{{currentDistance}}', formatDistanceForDisplay(distanceToCard))
-    //           .replace('{{requiredDistance}}', formatDistanceForDisplay(REQUIRED_SURVEY_DISTANCE))
-    //       );
-    //       return;
-    //     }
-    //   }
-    // }
+    const cardLat = Number(selectedCard?.latitude);
+    const cardLng = Number(selectedCard?.longitude);
+    if (Number.isFinite(cardLat) && Number.isFinite(cardLng)) {
+      const userLat = Number(currentUserLocation?.latitude);
+      const userLng = Number(currentUserLocation?.longitude);
+      if (Number.isFinite(userLat) && Number.isFinite(userLng)) {
+        const distanceToCard = Math.round(getDistanceMeters(userLat, userLng, cardLat, cardLng));
+        if (distanceToCard > REQUIRED_SURVEY_DISTANCE) {
+          showSurveyPopup(
+            'Out of Range',
+            msg.distance.outOfRange
+              .replace('{{currentDistance}}', formatDistanceForDisplay(distanceToCard))
+              .replace('{{requiredDistance}}', formatDistanceForDisplay(REQUIRED_SURVEY_DISTANCE)),
+            'warning',
+            'wrong-location'
+          );
+          return;
+        }
+      }
+    }
 
     setCardWorkflowState((prev) => ({
       ...prev,
@@ -515,7 +554,7 @@ const MapScreen = ({ navigation }) => {
     } finally {
       hideLoader();
     }
-  }, [assignedWard, currentLineId, currentUserLocation, getCardState, hideLoader, selectedCard, showAlert, showLoader]);
+  }, [assignedWard, currentLineId, currentUserLocation, getCardState, hideLoader, selectedCard, showAlert, showLoader, showSurveyPopup]);
 
 
   const resetCurrentSurveyProgress = useCallback(() => {
@@ -700,22 +739,22 @@ const MapScreen = ({ navigation }) => {
         const accuracy = Number(position?.coords?.accuracy);
         setLocating(false);
         if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
-          showAlert('error', msg.location.gpsTurnOn);
+          showSurveyPopup('Location Error', msg.location.gpsTurnOn, 'destructive', 'location-off');
           return;
         }
         if (Number.isFinite(accuracy) && accuracy > surveySettings.maxAcceptableAccuracyMeters) {
-          showAlert('error', msg.location.accuracyLow);
+          showSurveyPopup('Low Accuracy', msg.location.accuracyLow, 'warning', 'my-location');
           return;
         }
         updateUserLocation(latitude, longitude, true);
       },
       () => {
         setLocating(false);
-        showAlert('error', msg.location.gpsTurnOn);
+        showSurveyPopup('Location Error', msg.location.gpsTurnOn, 'destructive', 'location-off');
       },
       locationSettings.getCurrentPosition
     );
-  }, [locating, showAlert, updateUserLocation]);
+  }, [locating, showSurveyPopup, updateUserLocation]);
 
   const handleNavigateToLineStart = useCallback(() => {
     const startPoint = currentLine?.points?.[0];
@@ -963,6 +1002,7 @@ const MapScreen = ({ navigation }) => {
                   icon: 'logout',
                   onPress: () => {
                     pauseTracking();
+                    Geolocation.stopObserving();
                     logoutSurveyor(
                       (screen) => navigation.navigate(screen),
                       showAlert,

@@ -2,7 +2,7 @@ import RNFS from 'react-native-fs';
 import ImageResizer from 'react-native-image-resizer';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { CITY } from '../../Firebase/firebaseConfig';
-import { saveData, updateData, uploadFileToStorage } from '../../Firebase/dbServices';
+import { getData, saveData, updateData, uploadFileToStorage } from '../../Firebase/dbServices';
 
 const MAX_IMAGE_SIZE_BYTES = 50 * 1024; // 50KB
 const DEFAULT_LAT_LNG = '0,0';
@@ -31,6 +31,11 @@ const sanitizePathPart = (value) => String(value ?? '')
   .trim()
   .replace(/[.#$/[\]]/g, '_')
   .replace(/\s+/g, '_');
+
+const resolveCardMappingPath = (scanCardNumber) => {
+  const qrKey = sanitizePathPart(scanCardNumber);
+  return `HUFCardData/CardMapping/${qrKey}`;
+};
 
 const getFileSizeInBytes = async (uri) => {
   const stat = await RNFS.stat(normalizeFilePath(uri));
@@ -273,6 +278,62 @@ export const flushPendingSurveyImageUploads = async () => {
   };
 };
 
+export const validateScanCardMapping = async ({
+  scanCardNumber,
+  ward,
+  lineNumber,
+}) => {
+  if (!scanCardNumber || !ward || !lineNumber) {
+    return {
+      ok: false,
+      message: 'Missing required params for card mapping validation',
+    };
+  }
+
+  try {
+    const safeWard = sanitizePathPart(ward);
+    const safeLine = sanitizePathPart(lineNumber);
+    const mappingPath = resolveCardMappingPath(scanCardNumber);
+    const existingMapping = await getData(mappingPath);
+
+    if (existingMapping && typeof existingMapping === 'object') {
+      const mappedWard = String(existingMapping?.ward || '').trim();
+      const mappedLine = String(existingMapping?.line || existingMapping?.lineNumber || '').trim();
+
+      if (
+        mappedWard
+        && mappedLine
+        && (mappedWard !== safeWard || mappedLine !== safeLine)
+      ) {
+        return {
+          ok: false,
+          code: 'CARD_MAPPED_TO_OTHER_LINE_OR_WARD',
+          message: `This card is already mapped to ward ${mappedWard}, line ${mappedLine}`,
+          data: {
+            mappedWard,
+            mappedLine,
+            mappingPath,
+          },
+        };
+      }
+    }
+
+    return {
+      ok: true,
+      data: {
+        mappingPath,
+        existingMapping,
+      },
+    };
+  } catch (error) {
+    SURVEY_SAVE_LOG('validateScanCardMapping:error', error?.message || error, error);
+    return {
+      ok: false,
+      message: error?.message || 'Unable to validate card mapping',
+    };
+  }
+};
+
 export const saveSurveyDetails = async ({
   ward,
   lineNumber,
@@ -306,6 +367,7 @@ export const saveSurveyDetails = async ({
     const safeWard = sanitizePathPart(ward);
     const safeLine = sanitizePathPart(lineNumber);
     const safeCardNumber = sanitizePathPart(cardNumber);
+    const cardMappingPath = resolveCardMappingPath(scanCardNumber);
     const dbPath = `HUFCardData/${safeWard}/${safeLine}/${safeCardNumber}/${qrKey}`;
     const houseCardPath = `Houses/${safeWard}/${safeLine}/${safeCardNumber}`;
     // const houseLinePath = `Houses/${safeWard}/${safeLine}`;
@@ -331,6 +393,15 @@ export const saveSurveyDetails = async ({
     //   }
     // }
 
+    const mappingCheck = await validateScanCardMapping({
+      scanCardNumber,
+      ward: safeWard,
+      lineNumber: safeLine,
+    });
+    if (!mappingCheck?.ok) {
+      return mappingCheck;
+    }
+
     const payload = {
       imgName: `${sanitizePathPart(scanCardNumber)}.jpg`,
       latLng: parseLatLngForSave(latLng),
@@ -344,6 +415,13 @@ export const saveSurveyDetails = async ({
     });
     await saveData(dbPath, payload);
     await updateData(houseCardPath, { hufRfidNumber: String(scanCardNumber || '') });
+    await updateData(cardMappingPath, {
+      ward: safeWard,
+      line: safeLine,
+      cardNumber: safeCardNumber,
+      scanCardNumber: String(scanCardNumber || '').trim(),
+      _at: toDateTimeString(),
+    });
     SURVEY_SAVE_LOG('db:save:done', { dbPath });
 
     const queueItem = await enqueuePendingUpload({

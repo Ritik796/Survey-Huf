@@ -1,5 +1,5 @@
 import { checkWorkAssignment } from '../../Services/WorkAssignment/WorkAssignmentService';
-import { getUserDetails, saveUserDetails, clearAll } from '../../utils/storage';
+import { getUserDetails, saveUserDetails, clearUserDetails } from '../../utils/storage';
 import { setIsLogin } from '../../Services/Login/LoginService';
 
 // ─── Check Work Assignment & Navigate ────────────────────────────────────────
@@ -44,7 +44,7 @@ export const logoutSurveyor = async (navigate, showAlert) => {
     if (user?.userId) {
       await setIsLogin(user.userId);
     }
-    await clearAll();
+    await clearUserDetails();
     showAlert('success', 'Logged out successfully!');
     setTimeout(() => navigate('Login'), 1000);
   } catch (err) {

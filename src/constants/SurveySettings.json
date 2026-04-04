@@ -42,7 +42,7 @@
   "messages": {
     "survey": {
       "missingFields": "सभी जरूरी सर्वे स्टेप पूरे करें।",
-      "saveSuccess": "सर्वे डेटा सफलतापूर्वक सहेजा गया।",
+      "saveSuccess": "Survey saved successfully!",
       "saveFailed": "Survey save failed"
     },
     "location": {
