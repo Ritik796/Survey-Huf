@@ -91,7 +91,7 @@ export const checkForUpdates = async (callbacks = {}, runtimeConfig = null, opti
       if (hasNativeVersionMismatch) {
         onUpdateFound?.(
           latestVersion,
-          'Aapka app purana ho gaya hai. Admin se naya APK install karwayein.',
+          'Your app is outdated. Please contact admin to install the new APK.',
           () => {
             if (skipNativeExit) return;
             BackHandler.exitApp();
@@ -127,7 +127,7 @@ export const checkForUpdates = async (callbacks = {}, runtimeConfig = null, opti
         }
 
         const downloadUrl = gitAccessToken ? otaPackageAsset.url : otaPackageAsset.browser_download_url;
-        onUpdateFound?.(latestVersion, 'Update tayyar ho raha hai...', () => {
+        onUpdateFound?.(latestVersion, 'Preparing update...', () => {
           if (otaPackageAsset.name === 'ota-package.zip') {
             downloadOtaPackage(downloadUrl, latestBundleAssetId, gitAccessToken, onProgress, onComplete, onError);
           } else {

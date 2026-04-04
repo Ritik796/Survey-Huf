@@ -1,10 +1,7 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, Dimensions, Image, Animated, Easing } from 'react-native';
 import { theme } from '../theme/appTheme';
 import { getUserDetails } from '../utils/storage';
-import { checkForUpdates } from '../Services/otaService';
-import { createOtaUpdateHandlers } from '../Actions/Ota/OtaActions';
-import UpdateModal from '../Components/UpdateModal/UpdateModal';
 
 const { width } = Dimensions.get('window');
 
@@ -15,64 +12,15 @@ const SplashScreen = ({ navigation }) => {
     const textOpacity = useRef(new Animated.Value(0)).current;
     const floatAnim = useRef(new Animated.Value(0)).current;
     const rotateAnim = useRef(new Animated.Value(0)).current;
-    const pendingUpdateActionRef = useRef(null);
-    const hasPendingOtaRef = useRef(false);
     const hasNavigatedRef = useRef(false);
 
-    const [otaModal, setOtaModal] = useState({
-        visible: false,
-        title: 'Naya Update Available',
-        actionLabel: 'Abhi Update Karein',
-        updateType: 'js',
-        progress: 0,
-        status: '',
-        version: '',
-        description: '',
-        isDownloading: false,
-        canStartUpdate: false,
-        showUnavailableMessage: false,
-        unavailableMessage: '',
-        isMandatoryBlock: false,
-        blockApp: false,
-        hideActions: false,
-        hideFooterNote: false,
-        nonDismissible: true,
-    });
-
     const navigateBySession = useCallback(async () => {
-        if (hasNavigatedRef.current || hasPendingOtaRef.current) return;
+        if (hasNavigatedRef.current) return;
         const user = await getUserDetails();
         const hasActiveSession = Boolean(user?.userId);
         hasNavigatedRef.current = true;
         navigation.replace(hasActiveSession ? 'StartSurvey' : 'Login');
     }, [navigation]);
-
-    const onUpdatePress = useCallback(() => {
-        const startUpdate = pendingUpdateActionRef.current;
-        if (!startUpdate) return;
-        if (otaModal.updateType === 'native') {
-            setOtaModal((prev) => ({
-                ...prev,
-                canStartUpdate: false,
-                status: 'App band ho raha hai...',
-                showUnavailableMessage: false,
-                unavailableMessage: '',
-            }));
-            pendingUpdateActionRef.current = null;
-            startUpdate();
-            return;
-        }
-        setOtaModal((prev) => ({
-            ...prev,
-            isDownloading: true,
-            canStartUpdate: false,
-            status: 'Downloading update...',
-            showUnavailableMessage: false,
-            unavailableMessage: '',
-        }));
-        pendingUpdateActionRef.current = null;
-        startUpdate();
-    }, [otaModal.updateType]);
 
     useEffect(() => {
         // Entrance animations (staggered)
@@ -116,30 +64,8 @@ const SplashScreen = ({ navigation }) => {
             navigateBySession();
         }, 4500);
 
-        const otaHandlers = createOtaUpdateHandlers({
-            setOtaModal,
-            pendingUpdateActionRef,
-        });
-
-        const otaCheckTimer = setTimeout(async () => {
-            const wrappedHandlers = {
-                ...otaHandlers,
-                onUpdateFound: (version, status, startUpdateFn, meta) => {
-                    hasPendingOtaRef.current = true;
-                    otaHandlers.onUpdateFound(version, status, startUpdateFn, meta);
-                },
-                onError: (error) => {
-                    hasPendingOtaRef.current = false;
-                    otaHandlers.onError(error);
-                },
-            };
-
-            await checkForUpdates(wrappedHandlers, null, { forceRefreshDb: true, skipNativeExit: false });
-        }, 1800);
-
         return () => {
             clearTimeout(timer);
-            clearTimeout(otaCheckTimer);
         };
     }, [logoTranslateY, logoOpacity, textTranslateY, textOpacity, floatAnim, rotateAnim, navigateBySession]);
 
@@ -175,23 +101,6 @@ const SplashScreen = ({ navigation }) => {
 
       </Animated.View>
 
-      <UpdateModal
-        visible={otaModal.visible}
-        title={otaModal.title}
-        progress={otaModal.progress}
-        status={otaModal.status}
-        version={otaModal.version}
-        description={otaModal.description}
-        actionLabel={otaModal.actionLabel}
-        onUpdatePress={onUpdatePress}
-        isDownloading={otaModal.isDownloading}
-        canStartUpdate={otaModal.canStartUpdate}
-        showUnavailableMessage={otaModal.showUnavailableMessage}
-        unavailableMessage={otaModal.unavailableMessage}
-        hideActions={otaModal.hideActions}
-        hideFooterNote={otaModal.hideFooterNote}
-        nonDismissible={otaModal.nonDismissible}
-      />
     </View>);
 };
 const styles = StyleSheet.create({
