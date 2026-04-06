@@ -383,7 +383,7 @@ export const saveSurveyDetails = async ({
     const safeLine = sanitizePathPart(lineNumber);
     const safeCardNumber = sanitizePathPart(cardNumber);
     const cardMappingPath = resolveCardMappingPath(scanCardNumber);
-    const dbPath = `HUFCardData/${safeWard}/${safeLine}/${safeCardNumber}/${qrKey}`;
+    const dbPath = `HUFCardData/${safeWard}/${safeLine}/${safeCardNumber}`;
     const houseCardPath = `Houses/${safeWard}/${safeLine}/${safeCardNumber}`;
     // const houseLinePath = `Houses/${safeWard}/${safeLine}`;
     // const lineCards = await getData(houseLinePath);
@@ -419,6 +419,7 @@ export const saveSurveyDetails = async ({
 
     const payload = {
       imgName: `${sanitizePathPart(scanCardNumber)}.jpg`,
+      hufNumber: qrKey,
       latLng: parseLatLngForSave(latLng),
       _at: toDateTimeString(),
       surveyorId: String(surveyorId),
